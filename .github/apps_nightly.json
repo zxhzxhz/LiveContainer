@@ -14,15 +14,15 @@
       "bundleIdentifier": "com.kdt.livecontainer",
       "developerName": "LiveContainer Team",
       "subtitle": "Run iOS apps without actually installing them!",
-      "version": "3.4.50",
-      "versionDate": "2025-04-26",
-      "versionDescription": "This is a nightly release [created automatically with GitHub Actions workflow](https://github.com/LiveContainer/LiveContainer/actions/runs/14679205373/attempts/1).",
-      "downloadURL": "https://github.com/LiveContainer/LiveContainer/releases/download/nightly/LiveContainer.ipa",
+      "version": "3.8.10",
+      "versionDate": "2026-09-21T17:11:24Z",
+      "versionDescription": "Nightly build from [8603ca5](https://github.com/LiveContainer/LiveContainer/commit/8603ca5): Point AltStore source generation at this fork\n\nThis is a nightly release [created automatically with GitHub Actions workflow](https://github.com/zxhzxhz/LiveContainer/actions/runs/35630907699/attempts/1).\n",
+      "downloadURL": "https://github.com/zxhzxhz/LiveContainer/releases/download/nightly/LiveContainer.ipa",
       "localizedDescription": "Run iOS apps without actually installing them!",
       "iconURL": "https://raw.githubusercontent.com/LiveContainer/LiveContainer/main/screenshots/AppIcon1024.png",
       "tintColor": "#0784FC",
       "category": "utilities",
-      "size": 2785962,
+      "size": 4744950,
       "screenshotURLs": [
         "https://raw.githubusercontent.com/LiveContainer/LiveContainer/main/screenshots/1.png"
       ],
@@ -80,13 +80,17 @@
       },
       "versions": [
         {
-          "version": "3.4.50",
-          "date": "2025-04-26T07:00:00Z",
-          "localizedDescription": "This is a nightly release [created automatically with GitHub Actions workflow](https://github.com/LiveContainer/LiveContainer/actions/runs/14679205373/attempts/1).",
-          "downloadURL": "https://github.com/LiveContainer/LiveContainer/releases/download/nightly/LiveContainer.ipa",
-          "size": 2785962
+          "version": "3.8.10",
+          "date": "2026-09-21T17:11:24Z",
+          "localizedDescription": "Nightly build from [8603ca5](https://github.com/LiveContainer/LiveContainer/commit/8603ca5): Point AltStore source generation at this fork\n\nThis is a nightly release [created automatically with GitHub Actions workflow](https://github.com/zxhzxhz/LiveContainer/actions/runs/35630907699/attempts/1).\n",
+          "downloadURL": "https://github.com/zxhzxhz/LiveContainer/releases/download/nightly/LiveContainer.ipa",
+          "size": 4744950,
+          "commit": "8603ca5",
+          "headline": "Point AltStore source generation at this fork"
         }
-      ]
+      ],
+      "commit": "8603ca5",
+      "headline": "Point AltStore source generation at this fork"
     }
   ],
   "news": []
