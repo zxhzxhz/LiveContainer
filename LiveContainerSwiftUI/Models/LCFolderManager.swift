@@ -18,24 +18,66 @@ import Foundation
 import Combine
 
 struct LCFolder: Codable, Identifiable, Equatable {
-    var id: String = UUID().uuidString
-    var name: String = ""
-    var pinned: Bool = false
+    var id: String
+    var name: String
+    var pinned: Bool
     /// Membership, in the order apps were added.
-    var appIds: [String] = []
+    var appIds: [String]
     /// Per folder sort settings - independent from the root app list.
-    var sortTypeRaw: String = AppSortType.defaultOrder.rawValue
-    var customSortOrder: [String] = []
+    var sortTypeRaw: String
+    var customSortOrder: [String]
+
+    init(id: String = UUID().uuidString,
+         name: String = "",
+         pinned: Bool = false,
+         appIds: [String] = [],
+         sortTypeRaw: String = AppSortType.defaultOrder.rawValue,
+         customSortOrder: [String] = []) {
+        self.id = id
+        self.name = name
+        self.pinned = pinned
+        self.appIds = appIds
+        self.sortTypeRaw = sortTypeRaw
+        self.customSortOrder = customSortOrder
+    }
 
     var sortType: AppSortType {
         get { AppSortType(rawValue: sortTypeRaw) ?? .defaultOrder }
         set { sortTypeRaw = newValue.rawValue }
     }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, pinned, appIds, customSortOrder
+        case sortTypeRaw = "sortType"
+    }
+
+    /// Tolerant decoding: a missing or malformed field falls back to the
+    /// default instead of throwing away the whole folder list.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? container.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        name = (try? container.decode(String.self, forKey: .name)) ?? ""
+        pinned = (try? container.decode(Bool.self, forKey: .pinned)) ?? false
+        appIds = (try? container.decode([String].self, forKey: .appIds)) ?? []
+        sortTypeRaw = (try? container.decode(String.self, forKey: .sortTypeRaw)) ?? AppSortType.defaultOrder.rawValue
+        customSortOrder = (try? container.decode([String].self, forKey: .customSortOrder)) ?? []
+    }
 }
 
 private struct LCFolderDatabase: Codable {
-    var version: Int = 1
-    var folders: [LCFolder] = []
+    var version: Int
+    var folders: [LCFolder]
+
+    init(version: Int = 1, folders: [LCFolder] = []) {
+        self.version = version
+        self.folders = folders
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = (try? container.decode(Int.self, forKey: .version)) ?? 1
+        folders = (try? container.decode([LCFolder].self, forKey: .folders)) ?? []
+    }
 }
 
 final class LCFolderManager: ObservableObject {
