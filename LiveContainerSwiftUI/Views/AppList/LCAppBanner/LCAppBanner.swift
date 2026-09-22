@@ -21,17 +21,21 @@ struct LCAppBanner: UIViewControllerRepresentable {
 
     @ObservedObject var model: LCAppModel
 
+    /// When the banner is shown inside a folder, the id of that folder.
+    private var folderId: String?
+
     @AppStorage("dynamicColors", store: LCUtils.appGroupUserDefault) private var dynamicColors = true
     @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) private var darkModeIcon = false
     private let sharedModel = DataManager.shared.model
 
-    init(appModel: LCAppModel, delegate: LCAppBannerDelegate) {
+    init(appModel: LCAppModel, delegate: LCAppBannerDelegate, folderId: String? = nil) {
         _model = ObservedObject(wrappedValue: appModel)
         self.delegate = delegate
+        self.folderId = folderId
     }
 
     func makeUIViewController(context: Context) -> UIViewController {
-        let viewController = LCAppBannerViewController(delegate: delegate, config: LCAppBannerConfiguration(model: model, dynamicColors: dynamicColors, darkModeIcon: darkModeIcon))
+        let viewController = LCAppBannerViewController(delegate: delegate, config: LCAppBannerConfiguration(model: model, dynamicColors: dynamicColors, darkModeIcon: darkModeIcon, folderId: folderId))
         return viewController
     }
 
@@ -42,7 +46,8 @@ struct LCAppBanner: UIViewControllerRepresentable {
         viewController.update(
             model: model,
             dynamicColors: dynamicColors,
-            darkModeIcon: darkModeIcon
+            darkModeIcon: darkModeIcon,
+            folderId: folderId
         )
     }
 
