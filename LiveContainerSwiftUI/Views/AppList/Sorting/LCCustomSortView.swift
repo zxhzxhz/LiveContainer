@@ -8,13 +8,22 @@ import SwiftUI
 import Combine
 
 struct LCCustomSortView: View {
+    /// When set, the custom order is edited for the given folder instead of
+    /// the root app list.
+    var folderId: String? = nil
+
     @EnvironmentObject private var sharedModel: SharedModel
     @Environment(\.presentationMode) var presentationMode
     @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) var darkModeIcon = false
-    
+    @ObservedObject private var folderManager = LCFolderManager.shared
+
     // Local state for editing without modifying shared model
     @State private var localApps: [LCAppModel] = []
     @State private var localHiddenApps: [LCAppModel] = []
+
+    private var isFolderMode: Bool {
+        folderId != nil
+    }
     
     var body: some View {
         NavigationView {
@@ -50,7 +59,7 @@ struct LCCustomSortView: View {
                 }
                 
                 // Hidden apps section
-                if sharedModel.isHiddenAppUnlocked && !localHiddenApps.isEmpty {
+                if !isFolderMode && sharedModel.isHiddenAppUnlocked && !localHiddenApps.isEmpty {
                     Section("lc.appList.hiddenApps".loc) {
                         ForEach(localHiddenApps, id: \.self) { app in
                              HStack {
@@ -121,6 +130,11 @@ struct LCCustomSortView: View {
 
     private func initializeLocalState() {
         let manager = LCAppSortManager.shared
+        if let folderId, let folder = folderManager.folder(withId: folderId) {
+            self.localApps = manager.getSortedApps(folderManager.apps(in: folder, from: sharedModel.apps), sortType: .custom, customSortOrder: folder.customSortOrder)
+            self.localHiddenApps = []
+            return
+        }
         self.localApps = manager.getSortedApps(sharedModel.apps, sortType: .custom, customSortOrder: manager.customSortOrder)
         self.localHiddenApps = manager.getSortedApps(sharedModel.hiddenApps, sortType: .custom, customSortOrder: manager.customSortOrder)
     }
@@ -136,6 +150,13 @@ struct LCCustomSortView: View {
     
     private func saveChanges() {
         let manager = LCAppSortManager.shared
+        
+        if let folderId {
+            let newCustomOrder = localApps.compactMap { manager.getUniqueIdentifier(for: $0) }
+            folderManager.setCustomSortOrder(newCustomOrder, folderId: folderId)
+            presentationMode.wrappedValue.dismiss()
+            return
+        }
         
         let newCustomOrder = (localApps + localHiddenApps)
             .compactMap { manager.getUniqueIdentifier(for: $0) }

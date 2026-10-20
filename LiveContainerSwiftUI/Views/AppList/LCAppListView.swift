@@ -75,6 +75,18 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     
     @State private var customSortViewPresent = false
     
+    // Folder feature (UI only, see LCFolderManager)
+    @StateObject private var folderNameInput = InputHelper()
+    @State private var folderNameAction: FolderNameAction = .create
+    @State private var folderToDelete: LCFolder?
+    @ObservedObject private var folderManager = LCFolderManager.shared
+    
+    enum FolderNameAction {
+        case create
+        case rename(String)
+        case createAndMove(String)
+    }
+    
     @EnvironmentObject private var sharedModel : SharedModel
     @EnvironmentObject private var sharedAppSortManager : LCAppSortManager
     
@@ -116,6 +128,36 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }
     }
     
+    // MARK: - Folders
+
+    private var isSearchingApps: Bool {
+        return !searchContext.debouncedQuery.isEmpty
+    }
+
+    /// Folders are hidden while searching so that a search always looks at
+    /// every app, including the ones living in a folder.
+    private var displayedFolders: [LCFolder] {
+        return isSearchingApps ? [] : folderManager.foldersForDisplay
+    }
+
+    /// Root list apps: everything that is not assigned to a folder.
+    private var visibleApps: [LCAppModel] {
+        if isSearchingApps {
+            return filteredApps
+        }
+        let idsInFolders = folderManager.appIdsInFolders()
+        return filteredApps.filter { app in
+            guard let appId = LCAppSortManager.shared.getUniqueIdentifier(for: app) else {
+                return true
+            }
+            return !idsInFolders.contains(appId)
+        }
+    }
+
+    private func folderAppCount(_ folder: LCFolder) -> Int {
+        return folderManager.appCount(in: folder, from: sharedModel.apps)
+    }
+
     init() {
         _installOptions = State(initialValue: [])
     }
@@ -132,13 +174,34 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 .hidden()
                 
                 LazyVStack {
-                    ForEach(filteredApps, id: \.self) { app in
+                    ForEach(displayedFolders) { folder in
+                        LCFolderBanner(
+                            folder: folder,
+                            appCount: folderAppCount(folder),
+                            onRename: {
+                                promptRenameFolder(folder)
+                            },
+                            onTogglePin: {
+                                folderManager.togglePin(folderId: folder.id)
+                            },
+                            onDelete: {
+                                folderToDelete = folder
+                            }
+                        )
+                        .onTapGesture {
+                            openFolder(folderId: folder.id)
+                        }
+                    }
+                    .transition(.scale)
+
+                    ForEach(visibleApps, id: \.self) { app in
                         LCAppBanner(appModel: app, delegate: self)
                     }
                     .transition(.scale)
                 }
                 .padding()
                 .animation(searchContext.isTyping ? nil : .easeInOut, value: filteredApps)
+                .animation(searchContext.isTyping ? nil : .easeInOut, value: folderManager.folders)
 
                 VStack {
                     if LCUtils.appGroupUserDefault.bool(forKey: "LCStrictHiding") {
@@ -279,6 +342,14 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                                 Label("lc.appList.sort.customManage".loc, systemImage: "slider.horizontal.3")
                             }
                         }
+                        
+                        Divider()
+                        
+                        Button {
+                            promptNewFolder()
+                        } label: {
+                            Label("lc.folder.new".loc, systemImage: "folder.badge.plus")
+                        }
                     } label: {
                         Label("Sort by", systemImage: "line.3.horizontal.decrease.circle")
                     }
@@ -395,6 +466,37 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         .sheet(isPresented: $customSortViewPresent) {
             LCCustomSortView()
         }
+        .textFieldAlert(
+            isPresented: $folderNameInput.show,
+            title: folderNameAlertTitle,
+            text: $folderNameInput.initVal,
+            placeholder: "lc.folder.name".loc,
+            action: { newText in
+                folderNameInput.close(result: newText)
+            },
+            actionCancel: { _ in
+                folderNameInput.close(result: nil)
+            }
+        )
+        .alert("lc.folder.delete".loc, isPresented: Binding(get: {
+            folderToDelete != nil
+        }, set: { newValue in
+            if !newValue {
+                folderToDelete = nil
+            }
+        })) {
+            Button("lc.folder.delete".loc, role: .destructive) {
+                if let folder = folderToDelete {
+                    folderManager.delete(folderId: folder.id)
+                }
+                folderToDelete = nil
+            }
+            Button("lc.common.cancel".loc, role: .cancel) {
+                folderToDelete = nil
+            }
+        } message: {
+            Text("lc.folder.deleteTip".loc)
+        }
         .onAppear() {
             if !isViewAppeared {
                 if let webpageUrlStr = UserDefaults.standard.string(forKey: "webPageToOpen") {
@@ -491,7 +593,17 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         for app in sharedModel.hiddenApps {
             app.delegate = self
         }
+        pruneFolderAssignments()
         didAppear = true
+    }
+    
+    /// Drops folder assignments whose app does not exist anymore.
+    func pruneFolderAssignments() {
+        guard !sharedModel.apps.isEmpty else {
+            return
+        }
+        let validIds = Set(sharedModel.apps.compactMap { LCAppSortManager.shared.getUniqueIdentifier(for: $0) })
+        folderManager.prune(validAppIds: validIds)
     }
     
     
@@ -971,6 +1083,9 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     
     func removeApp(app: LCAppModel) {
         DispatchQueue.main.async {
+            if let appId = LCAppSortManager.shared.getUniqueIdentifier(for: app) {
+                folderManager.removeFromAllFolders(appId: appId)
+            }
             sharedModel.apps.removeAll { now in
                 return app == now
             }
@@ -979,6 +1094,98 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             }
             
         }
+    }
+    
+    // MARK: - Folder actions
+    
+    var folderNameAlertTitle: String {
+        switch folderNameAction {
+        case .create, .createAndMove:
+            return "lc.folder.new".loc
+        case .rename:
+            return "lc.folder.rename".loc
+        }
+    }
+    
+    func openFolder(folderId: String) {
+        navigateTo = AnyView(LCFolderView(folderId: folderId))
+        isNavigationActive = true
+    }
+    
+    func promptNewFolder() {
+        folderNameAction = .create
+        Task {
+            guard let name = await folderNameInput.open(initVal: "") else {
+                return
+            }
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                return
+            }
+            folderManager.createFolder(named: trimmed)
+        }
+    }
+    
+    func promptRenameFolder(_ folder: LCFolder) {
+        folderNameAction = .rename(folder.id)
+        Task {
+            guard let name = await folderNameInput.open(initVal: folder.name) else {
+                return
+            }
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                return
+            }
+            folderManager.rename(folderId: folder.id, to: trimmed)
+        }
+    }
+    
+    func promptNewFolderAndMove(appId: String) {
+        folderNameAction = .createAndMove(appId)
+        Task {
+            guard let name = await folderNameInput.open(initVal: "") else {
+                return
+            }
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                return
+            }
+            let folder = folderManager.createFolder(named: trimmed)
+            folderManager.add(appId: appId, to: folder.id)
+        }
+    }
+    
+    func folderContextMenu(app: LCAppModel, folderId: String?) -> UIMenu? {
+        // hidden apps live in their own section and are never shown in folders
+        guard !app.appInfo.isHidden else {
+            return nil
+        }
+        guard let appId = LCAppSortManager.shared.getUniqueIdentifier(for: app) else {
+            return nil
+        }
+        var children: [UIMenuElement] = []
+        
+        if let folderId, folderManager.folder(withId: folderId) != nil {
+            children.append(UIAction(title: "lc.folder.remove".loc,
+                                     image: UIImage(systemName: "folder.badge.minus")) { _ in
+                folderManager.remove(appId: appId, from: folderId)
+            })
+        }
+        
+        for folder in folderManager.folders where folder.id != folderId {
+            children.append(UIAction(title: folder.name, image: UIImage(systemName: "folder")) { _ in
+                folderManager.add(appId: appId, to: folder.id)
+            })
+        }
+        
+        children.append(UIAction(title: "lc.folder.new".loc,
+                                 image: UIImage(systemName: "folder.badge.plus")) { _ in
+            promptNewFolderAndMove(appId: appId)
+        })
+        
+        return UIMenu(title: "lc.folder.moveTo".loc,
+                      image: UIImage(systemName: "folder"),
+                      children: children)
     }
     
     func changeAppVisibility(app: LCAppModel) {
