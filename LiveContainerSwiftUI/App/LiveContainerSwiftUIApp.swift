@@ -98,6 +98,13 @@ struct LiveContainerSwiftUIApp : SwiftUI.App {
         if let tempURLSchemes {
             UserDefaults.lcShared().set(Array(tempURLSchemes), forKey: "LCGuestURLSchemes")
         }
+
+        // Re-start the built-in HTTP API server when it was left enabled.
+        if LCUtils.appGroupUserDefault.bool(forKey: "LCHTTPServerEnabled") {
+            DispatchQueue.main.async {
+                LCHTTPServer.shared.startIfEnabled()
+            }
+        }
     }
     
     var body: some Scene {
