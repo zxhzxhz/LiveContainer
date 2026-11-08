@@ -245,9 +245,9 @@ final class LCAppInstallerService {
         let sharedModel = DataManager.shared.model
         let newAppModel = LCAppModel(appInfo: finalNewApp, delegate: defaultAppDelegate)
         if let appToReplace {
-            if let oldSchemes = appToReplace.appInfo.urlSchemes(), !oldSchemes.isEmpty {
+            if let oldSchemes = appToReplace.appInfo.urlSchemes(), oldSchemes.count > 0 {
                 UserDefaults.lcShared().mutableArrayValue(forKey: "LCGuestURLSchemes")
-                    .removeObjects(in: oldSchemes as [Any])
+                    .removeObjects(in: oldSchemes as! [Any])
             }
             if appToReplace.uiIsHidden {
                 sharedModel.hiddenApps.removeAll { $0 == appToReplace }
@@ -255,16 +255,16 @@ final class LCAppInstallerService {
             } else {
                 sharedModel.apps.removeAll { $0 == appToReplace }
                 sharedModel.apps.append(newAppModel)
-                if let urlSchemes = finalNewApp.urlSchemes(), !urlSchemes.isEmpty {
+                if let urlSchemes = finalNewApp.urlSchemes(), urlSchemes.count > 0 {
                     UserDefaults.lcShared().mutableArrayValue(forKey: "LCGuestURLSchemes")
-                        .addObjects(from: urlSchemes as [Any])
+                        .addObjects(from: urlSchemes as! [Any])
                 }
             }
         } else {
             sharedModel.apps.append(newAppModel)
-            if let urlSchemes = finalNewApp.urlSchemes(), !urlSchemes.isEmpty {
+            if let urlSchemes = finalNewApp.urlSchemes(), urlSchemes.count > 0 {
                 UserDefaults.lcShared().mutableArrayValue(forKey: "LCGuestURLSchemes")
-                    .addObjects(from: urlSchemes as [Any])
+                    .addObjects(from: urlSchemes as! [Any])
             }
         }
 
@@ -311,9 +311,9 @@ final class LCAppInstallerService {
         if let appId = LCAppSortManager.shared.getUniqueIdentifier(for: targetModel) {
             LCFolderManager.shared.removeFromAllFolders(appId: appId)
         }
-        if let urlSchemes = appInfo.urlSchemes(), !urlSchemes.isEmpty {
+        if let urlSchemes = appInfo.urlSchemes(), urlSchemes.count > 0 {
             UserDefaults.lcShared().mutableArrayValue(forKey: "LCGuestURLSchemes")
-                .removeObjects(in: urlSchemes as [Any])
+                .removeObjects(in: urlSchemes as! [Any])
         }
         sharedModel.apps.removeAll { $0 == targetModel }
         sharedModel.hiddenApps.removeAll { $0 == targetModel }
