@@ -25,6 +25,14 @@ final class LCAppBannerRootView: UIView {
     private let nameStack = UIStackView()
     private let detailStack = UIStackView()
 
+    private var isControllerFocused = false
+    private var currentAccentColor: UIColor = .systemBlue
+
+    override var canBecomeFocused: Bool {
+        // The custom focus ring replaces the system focus engine.
+        false
+    }
+
     override var intrinsicContentSize: CGSize {
         CGSize(width: UIView.noIntrinsicMetric, height: Self.bannerHeight)
     }
@@ -44,11 +52,16 @@ final class LCAppBannerRootView: UIView {
         backgroundColor = .clear
         layer.cornerRadius = 22
         layer.cornerCurve = .continuous
-        clipsToBounds = true
+        // Shadows for the controller focus state must be drawn outside the
+        // bounds, so the clipping happens on visualBackgroundView instead.
+        clipsToBounds = false
 
         visualBackgroundView.translatesAutoresizingMaskIntoConstraints = false
         visualBackgroundView.isOpaque = false
         visualBackgroundView.isUserInteractionEnabled = false
+        visualBackgroundView.layer.cornerRadius = 22
+        visualBackgroundView.layer.cornerCurve = .continuous
+        visualBackgroundView.clipsToBounds = true
 
         iconImageView.translatesAutoresizingMaskIntoConstraints = false
         iconImageView.contentMode = .scaleAspectFit
@@ -179,6 +192,44 @@ final class LCAppBannerRootView: UIView {
         }
     }
 
+    /// Controller focus appearance: a slight spring scale plus a tinted halo.
+    func setControllerFocused(_ focused: Bool, animated: Bool = true) {
+        guard isControllerFocused != focused else {
+            return
+        }
+        isControllerFocused = focused
+
+        let applyVisuals = {
+            if focused {
+                self.transform = CGAffineTransform(scaleX: 1.022, y: 1.022)
+                self.visualBackgroundView.layer.borderWidth = 2.5
+                self.visualBackgroundView.layer.borderColor = self.currentAccentColor.withAlphaComponent(0.95).cgColor
+                self.layer.shadowColor = self.currentAccentColor.cgColor
+                self.layer.shadowOffset = CGSize(width: 0, height: 4)
+                self.layer.shadowRadius = 10
+                self.layer.shadowOpacity = 0.45
+            } else {
+                self.transform = .identity
+                self.visualBackgroundView.layer.borderWidth = 0
+                self.visualBackgroundView.layer.borderColor = nil
+                self.layer.shadowOpacity = 0
+            }
+        }
+
+        if animated {
+            UIView.animate(
+                withDuration: 0.22,
+                delay: 0,
+                usingSpringWithDamping: 0.75,
+                initialSpringVelocity: 0.5,
+                options: [.beginFromCurrentState, .allowUserInteraction],
+                animations: applyVisuals
+            )
+        } else {
+            applyVisuals()
+        }
+    }
+
     private func configureLabel(_ label: UILabel, font: UIFont) {
         label.font = font
         label.numberOfLines = 1
@@ -196,6 +247,7 @@ final class LCAppBannerRootView: UIView {
         let icon = appInfo.iconIsDarkIcon(darkModeIcon) ?? UIImage()
         let mainColor = Self.extractMainHueColor(appInfo: appInfo, icon: icon, darkModeIcon: darkModeIcon)
         let accentColor = dynamicColors ? mainColor : (UIColor(named: "FontColor") ?? .systemBlue)
+        currentAccentColor = accentColor
         let textColor = Self.readableTextColor(for: accentColor, traitCollection: traitCollection)
 
         iconImageView.image = icon
@@ -374,6 +426,10 @@ private final class LCAppBannerBadgeView: UIView {
 }
 
 final class LCAppBannerRunControl: UIControl {
+    override var canBecomeFocused: Bool {
+        false
+    }
+
     private let baseLayer = CALayer()
     private let progressCircleLayer = CALayer()
     private let titleLabel = UILabel()

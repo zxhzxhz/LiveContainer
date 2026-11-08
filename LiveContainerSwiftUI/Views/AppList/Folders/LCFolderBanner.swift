@@ -10,6 +10,7 @@ import SwiftUI
 struct LCFolderBanner: View {
     let folder: LCFolder
     let appCount: Int
+    var isControllerFocused: Bool = false
     var onRename: () -> Void
     var onTogglePin: () -> Void
     var onDelete: () -> Void
@@ -56,6 +57,17 @@ struct LCFolderBanner: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(Color(uiColor: .secondarySystemGroupedBackground))
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.95), lineWidth: 2.5)
+                .opacity(isControllerFocused ? 1 : 0)
+        )
+        .scaleEffect(isControllerFocused ? 1.022 : 1.0)
+        .shadow(color: Color.accentColor.opacity(isControllerFocused ? 0.45 : 0),
+                radius: isControllerFocused ? 10 : 0,
+                x: 0,
+                y: 4)
+        .animation(.spring(response: 0.22, dampingFraction: 0.75), value: isControllerFocused)
         .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .contextMenu {
             Button(action: onRename) {
