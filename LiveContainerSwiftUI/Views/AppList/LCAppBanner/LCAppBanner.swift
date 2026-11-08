@@ -14,6 +14,7 @@ protocol LCAppBannerDelegate {
     func installMdm(data: Data)
     func openNavigationView(view: AnyView)
     func promptForGeneratedIconStyle() async -> GeneratedIconStyle?
+    func folderContextMenu(app: LCAppModel, folderId: String?) -> UIMenu?
 }
 
 struct LCAppBanner: UIViewControllerRepresentable {
