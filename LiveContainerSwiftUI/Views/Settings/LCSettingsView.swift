@@ -228,18 +228,6 @@ struct LCSettingsView: View {
                 } footer: {
                     Text("lc.settings.httpAPI.desc".loc)
                 }
-                .onChange(of: httpServerEnabled) { enabled in
-                    httpServer.isEnabled = enabled
-                    if enabled {
-                        httpToken = httpServer.apiToken
-                        httpServerPortText = String(httpServer.port)
-                    }
-                }
-                .onChange(of: httpServerLoopbackOnly) { _ in
-                    if httpServerEnabled {
-                        httpServer.restart()
-                    }
-                }
                 
                 Section {
                     if JITEnabler == .SideJITServer || JITEnabler == .JITStreamerEBLegacy {
@@ -468,6 +456,18 @@ struct LCSettingsView: View {
                 }
             }
             .navigationBarTitle("lc.tabView.settings".loc)
+            .onChange(of: httpServerEnabled) { enabled in
+                httpServer.isEnabled = enabled
+                if enabled {
+                    httpToken = httpServer.apiToken
+                    httpServerPortText = String(httpServer.port)
+                }
+            }
+            .onChange(of: httpServerLoopbackOnly) { _ in
+                if httpServerEnabled {
+                    httpServer.restart()
+                }
+            }
             .alert("lc.common.error".loc, isPresented: $errorShow){
             } message: {
                 Text(errorInfo)
