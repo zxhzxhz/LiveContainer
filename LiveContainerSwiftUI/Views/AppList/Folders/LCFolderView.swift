@@ -31,6 +31,9 @@ struct LCFolderView: View, LCAppBannerDelegate {
 
     @State private var navigateTo: AnyView?
     @State private var isNavigationActive = false
+    @State private var controllerActionApp: LCAppModel?
+    @State private var quickActionNonce = 0
+    @State private var savedHomeFocusIndex = 0
 
     private var folder: LCFolder? {
         folderManager.folder(withId: folderId)
@@ -69,7 +72,8 @@ struct LCFolderView: View, LCAppBannerDelegate {
                         appModel: app,
                         delegate: self,
                         folderId: folder.id,
-                        isControllerFocused: gameController.isFocusRingVisible && gameController.focusedIndex == index
+                        isControllerFocused: gameController.isFocusRingVisible && gameController.focusedIndex == index,
+                        quickActionNonce: controllerActionApp == app ? quickActionNonce : 0
                     )
                     .id(app)
                 }
@@ -99,8 +103,17 @@ struct LCFolderView: View, LCAppBannerDelegate {
             }
         }
         .onAppear {
-            // Entering a folder starts the focus ring at its first item.
-            gameController.focusedIndex = 0
+            if !gameController.isInFolderView {
+                savedHomeFocusIndex = gameController.focusedIndex
+                gameController.isInFolderView = true
+                gameController.focusedIndex = 0
+            }
+        }
+        .onDisappear {
+            if !isNavigationActive {
+                gameController.isInFolderView = false
+                gameController.focusedIndex = savedHomeFocusIndex
+            }
         }
         .navigationTitle(folder.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -202,7 +215,22 @@ struct LCFolderView: View, LCAppBannerDelegate {
 
     private func handleControllerCommand(_ command: LCControllerCommand, scrollProxy: ScrollViewProxy) {
         // A pushed settings page owns the controller until it is popped.
-        guard !isNavigationActive else {
+        if isNavigationActive {
+            if command == .cancel {
+                isNavigationActive = false
+                navigateTo = nil
+            }
+            return
+        }
+        guard !appPickerPresented,
+              !customSortViewPresent,
+              !deleteConfirmPresented,
+              !renameInput.show,
+              !generatedIconStyleSelector.show else {
+            return
+        }
+        if command == .cancel {
+            presentationMode.wrappedValue.dismiss()
             return
         }
         let items = apps
@@ -225,12 +253,49 @@ struct LCFolderView: View, LCAppBannerDelegate {
                 scrollProxy.scrollTo(items[next], anchor: .center)
             }
         case .confirm:
-            Task { try? await items[index].runApp() }
+            Task { await launchAppFromController(items[index]) }
+        case .contextMenu:
+            controllerActionApp = items[index]
+            quickActionNonce += 1
         case .openSettings:
             navigateTo = AnyView(LCAppSettingsView(model: items[index]))
             isNavigationActive = true
-        case .cancel, .contextMenu, .previousTab, .nextTab:
-            break // Handled by the app list or the tab bar
+        case .cancel, .previousTab, .nextTab:
+            break
+        }
+    }
+
+    private func launchAppFromController(_ app: LCAppModel) async {
+        if #available(iOS 16.0, *),
+           let currentDataFolder = app.uiSelectedContainer?.folderName,
+           MultitaskManager.isUsing(container: currentDataFolder) {
+            var found = false
+            if #available(iOS 16.1, *) {
+                found = MultitaskWindowManager.openExistingAppWindow(dataUUID: currentDataFolder)
+            }
+            if !found {
+                found = MultitaskDockManager.shared.bringMultitaskViewToFront(uuid: currentDataFolder)
+            }
+            if found {
+                return
+            }
+        }
+        if app.appInfo.isLocked && !sharedModel.isHiddenAppUnlocked {
+            do {
+                if !(try await LCUtils.authenticateUser()) {
+                    return
+                }
+            } catch {
+                errorInfo = error.localizedDescription
+                errorShow = true
+                return
+            }
+        }
+        do {
+            try await app.runApp()
+        } catch {
+            errorInfo = error.localizedDescription
+            errorShow = true
         }
     }
 
