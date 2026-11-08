@@ -849,101 +849,27 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 try fm.removeItem(at: outputFolder)
             }
         }
-        // Move it!
-        try fm.moveItem(at: appFolderPath, to: outputFolder)
-        let finalNewApp = LCAppInfo(bundlePath: outputFolder.path)
-        finalNewApp?.relativeBundlePath = appRelativePath
-        
-        guard let finalNewApp else {
-            errorInfo = "lc.appList.appInfoInitError".loc
-            errorShow = true
-            return
-        }
-        
-        // patch and sign it
-        var signError : String? = nil
-        var signSuccess = false
-        await withUnsafeContinuation({ c in
-            if appToReplace?.uiDontSign ?? false || LCUtils.appGroupUserDefault.bool(forKey: "LCDontSignApp") {
-                finalNewApp.dontSign = true
-            }
-            finalNewApp.patchExecAndSignIfNeed(completionHandler: { success, error in
-                signError = error
-                signSuccess = success
-                c.resume()
-            }, progressHandler: { signProgress in
-                installProgress.addChild(signProgress!, withPendingUnitCount: 20)
-            }, forceSign: false)
-        })
-        
-        // we leave it unsigned even if signing failed
-        if let signError {
-            if signSuccess {
-                errorInfo = "\("lc.appList.signSuccessWithError".loc)\n\n\(signError)"
+        // Move, sign and register through the shared install pipeline.
+        let result = try await LCAppInstallerService.shared.finalizeInstalledApp(
+            appBundleURL: appFolderPath,
+            appRelativePath: appRelativePath,
+            outputFolder: outputFolder,
+            appToReplace: appToReplace,
+            progress: installProgress
+        )
+        // Keep the list view as the model delegate so JIT prompts still work.
+        result.model.delegate = self
+        if let signError = result.signError {
+            if result.signSucceeded {
+                errorInfo = "lc.appList.signSuccessWithError".loc + "
+
+" + signError
             } else {
                 errorInfo = signError.loc
             }
             errorShow = true
         }
-        
-        if let appToReplace {
-            // copy previous configration to new app
-            finalNewApp.autoSaveDisabled = true
-            finalNewApp.isLocked = appToReplace.appInfo.isLocked
-            finalNewApp.isHidden = appToReplace.appInfo.isHidden
-            finalNewApp.isJITNeeded = appToReplace.appInfo.isJITNeeded
-            finalNewApp.isShared = appToReplace.appInfo.isShared
-            finalNewApp.spoofSDKVersion = appToReplace.appInfo.spoofSDKVersion
-            finalNewApp.doSymlinkInbox = appToReplace.appInfo.doSymlinkInbox
-            finalNewApp.containerInfo = appToReplace.appInfo.containerInfo
-            finalNewApp.tweakFolder = appToReplace.appInfo.tweakFolder
-            finalNewApp.selectedLanguage = appToReplace.appInfo.selectedLanguage
-            finalNewApp.dataUUID = appToReplace.appInfo.dataUUID
-            finalNewApp.orientationLock = appToReplace.appInfo.orientationLock
-            finalNewApp.dontInjectTweakLoader = appToReplace.appInfo.dontInjectTweakLoader
-            finalNewApp.hideLiveContainer = appToReplace.appInfo.hideLiveContainer
-            finalNewApp.dontLoadTweakLoader = appToReplace.appInfo.dontLoadTweakLoader
-            finalNewApp.doUseLCBundleId = appToReplace.appInfo.doUseLCBundleId
-            finalNewApp.fixFilePickerNew = appToReplace.appInfo.fixFilePickerNew
-            finalNewApp.fixLocalNotification = appToReplace.appInfo.fixLocalNotification
-            finalNewApp.fixBackgroundTaskIdentifiers = appToReplace.appInfo.fixBackgroundTaskIdentifiers
-            finalNewApp.lastLaunched = appToReplace.appInfo.lastLaunched
-            finalNewApp.jitLaunchScriptJs = appToReplace.appInfo.jitLaunchScriptJs
-            finalNewApp.multitaskSpecified = appToReplace.appInfo.multitaskSpecified
-            finalNewApp.classicMode = appToReplace.appInfo.classicMode
-            finalNewApp.autoSaveDisabled = false
-            finalNewApp.save()
-        } else {
-            // enable SDK version spoof by defalut
-            finalNewApp.spoofSDKVersion = true
-        }
-        finalNewApp.installationDate = Date.now
-        
-        DispatchQueue.main.async {
-            if let appToReplace {
-                let newAppModel = LCAppModel(appInfo: finalNewApp, delegate: self)
-                
-                if appToReplace.uiIsHidden {
-                    sharedModel.hiddenApps.removeAll { $0 == appToReplace }
-                    sharedModel.hiddenApps.append(newAppModel)
-                } else {
-                    sharedModel.apps.removeAll { $0 == appToReplace }
-                    sharedModel.apps.append(newAppModel)
-                }
-
-            } else {
-                let newAppModel = LCAppModel(appInfo: finalNewApp, delegate: self)
-                sharedModel.apps.append(newAppModel)
-                
-                // add url schemes
-                if let urlSchemes = finalNewApp.urlSchemes(), urlSchemes.count > 0 {
-                    UserDefaults.lcShared().mutableArrayValue(forKey: "LCGuestURLSchemes")
-                        .addObjects(from: urlSchemes as! [Any])
-                }
-            }
-
-            self.installprogressVisible = false
-        }
+        self.installprogressVisible = false
     }
     
     func startInstallFromUrl() async {

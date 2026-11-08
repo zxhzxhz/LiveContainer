@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftUI
+import UIKit
 import UserNotifications
 
 enum JITEnablerType : Int, CaseIterable, Identifiable {
@@ -67,7 +68,13 @@ struct LCSettingsView: View {
     @AppStorage("LCWaitForDebugger") var waitForDebugger = false
     @AppStorage("LCSharePrivateDataWithLiveProcess") var sharePrivateDataWithLiveProcess = false
     @AppStorage("BKNoWatchdogs") var disableLiveProcessWatchdog = false
-    
+
+    @AppStorage("LCHTTPServerEnabled", store: LCUtils.appGroupUserDefault) var httpServerEnabled = false
+    @AppStorage("LCHTTPServerLoopbackOnly", store: LCUtils.appGroupUserDefault) var httpServerLoopbackOnly = false
+    @State private var httpServerPortText = ""
+    @State private var httpToken = ""
+    @ObservedObject private var httpServer = LCHTTPServer.shared
+
     @EnvironmentObject private var sharedModel : SharedModel
     
     @State private var isViewAppeared = false
@@ -156,6 +163,80 @@ struct LCSettingsView: View {
                         }
                     } footer: {
                         Text("lc.settings.multitaskDesc".loc)
+                    }
+                }
+
+                Section {
+                    Toggle(isOn: $httpServerEnabled) {
+                        Text("lc.settings.httpAPI.enabled".loc)
+                    }
+                    if httpServerEnabled {
+                        HStack {
+                            Text("lc.settings.httpAPI.port".loc)
+                            Spacer()
+                            TextField("8080", text: $httpServerPortText)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .onChange(of: httpServerPortText) { newValue in
+                                    applyHTTPPort(newValue)
+                                }
+                        }
+                        Toggle(isOn: $httpServerLoopbackOnly) {
+                            Text("lc.settings.httpAPI.loopbackOnly".loc)
+                        }
+                        HStack {
+                            Text("lc.settings.httpAPI.token".loc)
+                            Spacer()
+                            Text(httpToken)
+                                .font(.system(.footnote, design: .monospaced))
+                                .foregroundStyle(.gray)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                            Button {
+                                UIPasteboard.general.string = httpToken
+                                successInfo = "lc.settings.httpAPI.tokenCopied".loc
+                                successShow = true
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        Button("lc.settings.httpAPI.regenerate".loc) {
+                            httpToken = httpServer.regenerateToken()
+                        }
+                        HStack {
+                            Text("lc.settings.httpAPI.status".loc)
+                            Spacer()
+                            if httpServer.isRunning {
+                                Label("lc.settings.httpAPI.running".loc, systemImage: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                            } else {
+                                Label("lc.settings.httpAPI.stopped".loc, systemImage: "xmark.circle")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if let error = httpServer.lastError, !error.isEmpty {
+                            Text(error)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                } header: {
+                    Text("lc.settings.httpAPI".loc)
+                } footer: {
+                    Text("lc.settings.httpAPI.desc".loc)
+                }
+                .onChange(of: httpServerEnabled) { enabled in
+                    httpServer.isEnabled = enabled
+                    if enabled {
+                        httpToken = httpServer.apiToken
+                        httpServerPortText = String(httpServer.port)
+                    }
+                }
+                .onChange(of: httpServerLoopbackOnly) { _ in
+                    if httpServerEnabled {
+                        httpServer.restart()
                     }
                 }
                 
@@ -445,6 +526,12 @@ struct LCSettingsView: View {
         }
         .navigationViewStyle(StackNavigationViewStyle())
         .onAppear() {
+            if httpToken.isEmpty {
+                httpToken = httpServer.apiToken
+            }
+            if httpServerPortText.isEmpty {
+                httpServerPortText = String(httpServer.port)
+            }
             if !isViewAppeared {
                 guard sharedModel.selectedTab == .settings, let link = sharedModel.deepLink else { return }
                 sharedModel.deepLink = nil
@@ -459,6 +546,20 @@ struct LCSettingsView: View {
         }
     }
     
+    private func applyHTTPPort(_ newValue: String) {
+        guard let value = Int(newValue), (1024...65535).contains(value) else {
+            return
+        }
+        let stored = LCUtils.appGroupUserDefault.integer(forKey: "LCHTTPServerPort")
+        guard stored != value else {
+            return
+        }
+        LCUtils.appGroupUserDefault.set(value, forKey: "LCHTTPServerPort")
+        if httpServerEnabled {
+            httpServer.restart()
+        }
+    }
+
     func openGitHub() {
         UIApplication.shared.open(URL(string: "https://github.com/LiveContainer/LiveContainer")!)
     }
