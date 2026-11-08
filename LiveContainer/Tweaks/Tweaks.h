@@ -14,6 +14,7 @@ void DyldHooksInit(bool hideLiveContainer, bool hookDlopen, uint32_t spoofSDKVer
 void NSFMGuestHooksInit(void);
 void NSURLSCGuestHooksInit(void);
 void initDead10ccFix(void);
+void initBackgroundKeepAlive(void);
 void IDFVHookInit(NSUUID* uuid);
 
 @interface NSBundle(LiveContainer)

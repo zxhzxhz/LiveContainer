@@ -23446,6 +23446,57 @@
         }
       }
     },
+    "lc.settings.backgroundKeepAlive" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background Keep-Alive"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "后台保活"
+          }
+        }
+      }
+    },
+    "lc.settings.backgroundKeepAliveDesc" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keeps a guest app running in the background with a silent audio session. Turn it on for individual apps in their settings page. This uses more battery."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通过静音音频会话让访客应用在后台继续运行。请在应用详情页为单个应用开启，此功能会显著增加耗电。"
+          }
+        }
+      }
+    },
+    "lc.appSettings.backgroundKeepAlive" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background Keep-Alive"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "后台保活"
+          }
+        }
+      }
+    },
     "lc.settings.httpAPI" : {
       "extractionState" : "manual",
       "localizations" : {

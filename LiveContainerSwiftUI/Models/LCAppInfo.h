@@ -36,6 +36,7 @@ typedef NS_ENUM(NSInteger, MultitaskSpecified){
 @property bool fixFilePickerNew;
 @property bool fixLocalNotification;
 @property bool fixBackgroundTaskIdentifiers;
+@property bool enableBackgroundKeepAlive;
 @property bool doUseLCBundleId;
 @property NSString* selectedLanguage;
 @property NSString* dataUUID;
