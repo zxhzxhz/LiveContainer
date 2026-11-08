@@ -37,7 +37,11 @@ struct LCAppSettingsView: View {
     @State private var errorShow = false
     @State private var errorInfo = ""
     @State private var selectUnusedContainerSheetShow = false
-    
+
+    @State private var diskUsage: LCAppDiskUsageResult? = nil
+    @State private var isCalculatingDiskUsage = false
+    @State private var diskCalculationTask: Task<Void, Never>? = nil
+
     @EnvironmentObject private var sharedModel : SharedModel
     
     init(model: LCAppModel) {
@@ -389,6 +393,34 @@ struct LCAppSettingsView: View {
             
             Section {
                 HStack {
+                    Text("lc.storage.appBundle".loc)
+                    Spacer()
+                    if isCalculatingDiskUsage && diskUsage == nil {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else if let usage = diskUsage {
+                        Text(LCDiskSizeCalculator.formatBytes(usage.appBundleBytes))
+                            .foregroundStyle(.gray)
+                    } else {
+                        Text("lc.common.unknown".loc)
+                            .foregroundStyle(.gray)
+                    }
+                }
+                HStack {
+                    Text("lc.storage.containers".loc)
+                    Spacer()
+                    if isCalculatingDiskUsage && diskUsage == nil {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else if let usage = diskUsage {
+                        Text(LCDiskSizeCalculator.formatBytes(usage.totalDataBytes))
+                            .foregroundStyle(.gray)
+                    } else {
+                        Text("lc.common.unknown".loc)
+                            .foregroundStyle(.gray)
+                    }
+                }
+                HStack {
                     Text("lc.appList.sort.lastLaunched".loc)
                     Spacer()
                     Text(formatDate(date: appInfo.lastLaunched))
@@ -401,7 +433,7 @@ struct LCAppSettingsView: View {
                         .foregroundStyle(.gray)
                 }
             } header: {
-                Text("lc.common.statistics")
+                Text("lc.common.statistics".loc)
             }
 
         }
@@ -479,6 +511,17 @@ struct LCAppSettingsView: View {
         }
         .fileImporter(isPresented: $choosingStorage, allowedContentTypes: [.folder]) { result in
             Task { await importDataStorage(result: result) }
+        }
+        .onAppear {
+            refreshDiskUsageStatistics()
+        }
+        .onDisappear {
+            diskCalculationTask?.cancel()
+            diskCalculationTask = nil
+            isCalculatingDiskUsage = false
+        }
+        .onChange(of: model.uiContainers.count) { _ in
+            refreshDiskUsageStatistics()
         }
     }
 
@@ -773,6 +816,33 @@ struct LCAppSettingsView: View {
         formatter1.timeStyle = .medium
         return formatter1.string(from: date)
     
+    }
+
+    /// Measures the bundle and container sizes off the main thread and keeps the
+    /// statistics section in sync with the current container list.
+    func refreshDiskUsageStatistics() {
+        diskCalculationTask?.cancel()
+        isCalculatingDiskUsage = true
+        let bundlePath = appInfo.bundlePath()
+        let containerInputs = model.uiContainers.map {
+            LCDiskSizeContainerInput(
+                folderName: $0.folderName,
+                url: $0.containerURL,
+                bookmarkResolved: $0.bookmarkResolved
+            )
+        }
+        diskCalculationTask = Task {
+            guard let result = try? await LCDiskSizeCalculator.calculateAppUsage(
+                bundlePath: bundlePath,
+                containers: containerInputs
+            ), !Task.isCancelled else {
+                return
+            }
+            await MainActor.run {
+                self.diskUsage = result
+                self.isCalculatingDiskUsage = false
+            }
+        }
     }
 }
 
