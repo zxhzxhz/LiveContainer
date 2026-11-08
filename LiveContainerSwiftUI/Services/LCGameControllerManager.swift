@@ -10,7 +10,7 @@ import Foundation
 import GameController
 import UIKit
 
-enum LCControllerCommand {
+enum LCControllerCommand: Equatable {
     case moveUp
     case moveDown
     case confirm       // A
