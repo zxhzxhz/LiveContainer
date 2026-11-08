@@ -213,6 +213,15 @@ final class LCSandboxFileManager {
         // Moving a symlink itself is safe, but never follow it out of bounds.
         try requireNotSymlinkOutsideRoot(sourceURL, rootURL: sourceRoot, virtualPath: fromVirtual)
 
+        let sourceStandardPath = sourceURL.standardizedFileURL.path
+        let destinationStandardPath = destinationURL.standardizedFileURL.path
+        if sourceStandardPath == destinationStandardPath {
+            return
+        }
+        if destinationStandardPath.hasPrefix(sourceStandardPath + "/") {
+            throw LCSandboxFSException.accessDeniedPathTraversal(toVirtual)
+        }
+
         if fm.fileExists(atPath: destinationURL.path) {
             guard overwrite else {
                 throw LCSandboxFSException.targetAlreadyExists(toVirtual)

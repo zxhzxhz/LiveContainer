@@ -16,6 +16,7 @@ struct LCInstalledAppDTO: Encodable {
     let isHidden: Bool
     let isJITNeeded: Bool
     let containers: [String]
+    let signWarning: String?
 }
 
 enum LCInstallerError: LocalizedError {
@@ -63,6 +64,9 @@ struct LCFinalizedInstallResult {
 final class LCAppInstallerService {
     static let shared = LCAppInstallerService()
     private var isInstalling = false
+    /// Delegate attached to newly installed LCAppModels so headless HTTP API
+    /// installs can still present JIT prompts when launched from the UI.
+    var defaultAppDelegate: LCAppModelDelegate?
     private init() {}
 
     // MARK: - Queries
@@ -73,7 +77,7 @@ final class LCAppInstallerService {
         if includeHidden {
             models.append(contentsOf: hiddenAppsForQueries)
         }
-        return models.map(dto(for:))
+        return models.map { dto(for: $0, signWarning: nil) }
     }
 
     /// DataManager moves apps between arrays; query both to stay consistent.
@@ -81,7 +85,7 @@ final class LCAppInstallerService {
         return DataManager.shared.model.hiddenApps
     }
 
-    private func dto(for model: LCAppModel) -> LCInstalledAppDTO {
+    private func dto(for model: LCAppModel, signWarning: String? = nil) -> LCInstalledAppDTO {
         return LCInstalledAppDTO(
             displayName: model.displayName,
             bundleIdentifier: model.bundleIdentifier,
@@ -90,7 +94,8 @@ final class LCAppInstallerService {
             isShared: model.uiIsShared,
             isHidden: model.uiIsHidden,
             isJITNeeded: model.uiIsJITNeeded,
-            containers: model.uiContainers.map { $0.folderName }
+            containers: model.uiContainers.map { $0.folderName },
+            signWarning: signWarning
         )
     }
 
@@ -142,6 +147,11 @@ final class LCAppInstallerService {
         var appToReplace: LCAppModel? = nil
 
         if let existing = existingApps.first, overwrite {
+            for container in existing.appInfo.containers {
+                if let runningLC = LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) {
+                    throw LCInstallerError.containerInUse(runningLC)
+                }
+            }
             appToReplace = existing
             appRelativePath = existing.appInfo.relativeBundlePath ?? appRelativePath
             outputFolder = (existing.uiIsShared ? LCPath.lcGroupBundlePath : LCPath.bundlePath)
@@ -158,7 +168,7 @@ final class LCAppInstallerService {
             appToReplace: appToReplace,
             progress: nil
         )
-        return dto(for: result.model)
+        return dto(for: result.model, signWarning: result.signError)
     }
 
     /// Moves an extracted bundle into place, signs it, copies the previous
@@ -233,14 +243,22 @@ final class LCAppInstallerService {
         finalNewApp.installationDate = Date.now
 
         let sharedModel = DataManager.shared.model
-        let newAppModel = LCAppModel(appInfo: finalNewApp)
+        let newAppModel = LCAppModel(appInfo: finalNewApp, delegate: defaultAppDelegate)
         if let appToReplace {
+            if let oldSchemes = appToReplace.appInfo.urlSchemes(), !oldSchemes.isEmpty {
+                UserDefaults.lcShared().mutableArrayValue(forKey: "LCGuestURLSchemes")
+                    .removeObjects(in: oldSchemes as [Any])
+            }
             if appToReplace.uiIsHidden {
                 sharedModel.hiddenApps.removeAll { $0 == appToReplace }
                 sharedModel.hiddenApps.append(newAppModel)
             } else {
                 sharedModel.apps.removeAll { $0 == appToReplace }
                 sharedModel.apps.append(newAppModel)
+                if let urlSchemes = finalNewApp.urlSchemes(), !urlSchemes.isEmpty {
+                    UserDefaults.lcShared().mutableArrayValue(forKey: "LCGuestURLSchemes")
+                        .addObjects(from: urlSchemes as [Any])
+                }
             }
         } else {
             sharedModel.apps.append(newAppModel)
@@ -293,12 +311,23 @@ final class LCAppInstallerService {
         if let appId = LCAppSortManager.shared.getUniqueIdentifier(for: targetModel) {
             LCFolderManager.shared.removeFromAllFolders(appId: appId)
         }
+        if let urlSchemes = appInfo.urlSchemes(), !urlSchemes.isEmpty {
+            UserDefaults.lcShared().mutableArrayValue(forKey: "LCGuestURLSchemes")
+                .removeObjects(in: urlSchemes as [Any])
+        }
         sharedModel.apps.removeAll { $0 == targetModel }
         sharedModel.hiddenApps.removeAll { $0 == targetModel }
 
         if !keepData {
+            let remainingApps = sharedModel.apps + sharedModel.hiddenApps
             for container in appInfo.containers {
                 let dataUUID = container.folderName
+                let sharedByOtherApp = remainingApps.contains { other in
+                    other.appInfo.containers.contains { $0.folderName == dataUUID }
+                }
+                guard !sharedByOtherApp else {
+                    continue
+                }
                 let dataURL = container.isShared
                     ? LCPath.lcGroupDataPath.appendingPathComponent(dataUUID)
                     : LCPath.dataPath.appendingPathComponent(dataUUID)

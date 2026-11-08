@@ -36,6 +36,11 @@ final class LCGameControllerManager: ObservableObject {
     @Published var isFocusRingVisible = false
     /// Index inside the currently displayed focusable list.
     @Published var focusedIndex = 0
+    /// True while a folder detail page is active on the navigation stack so the
+    /// root app list yields controller events to the folder view.
+    @Published var isInFolderView = false
+    /// True while a controller-triggered quick action sheet is presented.
+    @Published var isQuickActionSheetPresented = false
 
     let commandPublisher = PassthroughSubject<LCControllerCommand, Never>()
 
@@ -217,6 +222,13 @@ final class LCGameControllerManager: ObservableObject {
     private func emitCommand(_ command: LCControllerCommand) {
         if !isFocusRingVisible {
             isFocusRingVisible = true
+        }
+        if isQuickActionSheetPresented {
+            if command == .cancel {
+                isQuickActionSheetPresented = false
+                NotificationCenter.default.post(name: .LCGameControllerCancel, object: nil)
+            }
+            return
         }
         if command == .moveUp || command == .moveDown {
             selectionFeedback.selectionChanged()

@@ -99,6 +99,9 @@ final class LCHTTPServer: ObservableObject {
         guard isEnabled else {
             return
         }
+        // Ensure the API token is generated and persisted before accepting
+        // connections so streaming upload preflight checks always find it.
+        _ = apiToken
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
             lastError = "Invalid port \(port)"
             return
@@ -183,6 +186,10 @@ final class LCHTTPConnectionSession {
     init(connection: NWConnection, queue: DispatchQueue) {
         self.connection = connection
         self.queue = queue
+    }
+
+    deinit {
+        cleanupBodyFile()
     }
 
     func start() {
@@ -311,31 +318,11 @@ final class LCHTTPConnectionSession {
             return false
         }
         // Reject unauthenticated uploads before a single byte reaches the disk.
-        if isStreamingBody, !Self.hasValidToken(path: requestPath, headers: requestHeaders, query: parsedQuery) {
+        if isStreamingBody, !LCHTTPRouter.isAuthorized(path: requestPath, headers: requestHeaders, query: parsedQuery) {
             finishWithError(status: 401, message: "Missing or invalid API token")
             return false
         }
         return true
-    }
-
-    private static func hasValidToken(path: String, headers: [String: String], query: [String: String]) -> Bool {
-        guard let token = LCUtils.appGroupUserDefault.string(forKey: "LCHTTPServerToken"), !token.isEmpty else {
-            return false
-        }
-        if let header = headers["authorization"] {
-            let bearer = header.hasPrefix("Bearer ") ? String(header.dropFirst("Bearer ".count)) : header
-            if LCHTTPRouter.constantTimeEquals(bearer, token) {
-                return true
-            }
-        }
-        if let headerToken = headers["x-lc-token"], LCHTTPRouter.constantTimeEquals(headerToken, token) {
-            return true
-        }
-        if path == "/api/v1/fs/download", let queryToken = query["token"],
-           LCHTTPRouter.constantTimeEquals(queryToken, token) {
-            return true
-        }
-        return false
     }
 
     private func parseQuery(_ raw: String) {
@@ -626,24 +613,28 @@ final class LCHTTPRouter {
     // MARK: Auth
 
     private func isAuthorized(_ request: LCHTTPRequest) -> Bool {
-        let token = LCHTTPServer.shared.apiToken
-        guard !token.isEmpty else {
+        _ = LCHTTPServer.shared.apiToken
+        return Self.isAuthorized(path: request.path, headers: request.headers, query: request.query)
+    }
+
+    nonisolated static func isAuthorized(path: String, headers: [String: String], query: [String: String]) -> Bool {
+        guard let token = LCUtils.appGroupUserDefault.string(forKey: "LCHTTPServerToken"), !token.isEmpty else {
             return false
         }
-        if let header = request.headers["authorization"] {
+        if let header = headers["authorization"] {
             let bearer = header.hasPrefix("Bearer ") ? String(header.dropFirst("Bearer ".count)) : header
-            if Self.constantTimeEquals(bearer, token) {
+            if constantTimeEquals(bearer, token) {
                 return true
             }
         }
-        if let headerToken = request.headers["x-lc-token"], Self.constantTimeEquals(headerToken, token) {
+        if let headerToken = headers["x-lc-token"], constantTimeEquals(headerToken, token) {
             return true
         }
         // Only the download endpoint may carry the token in the query string so
         // that a browser or download manager can fetch a file directly.
-        if request.path == "/api/v1/fs/download",
-           let queryToken = request.query["token"],
-           Self.constantTimeEquals(queryToken, token) {
+        if path == "/api/v1/fs/download",
+           let queryToken = query["token"],
+           constantTimeEquals(queryToken, token) {
             return true
         }
         return false

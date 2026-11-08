@@ -24,6 +24,7 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
     private var configuration: LCAppBannerConfiguration
     private var exportTemporaryDirectory: URL?
     private var lastHandledQuickActionNonce = 0
+    private var cancelObserver: NSObjectProtocol?
     
     init(delegate: LCAppBannerDelegate, config: LCAppBannerConfiguration) {
         self.delegate = delegate
@@ -52,12 +53,13 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
         bannerView.addGestureRecognizer(doubleTapGesture)
 
         // The B button must be able to close a menu opened by the X button.
-        NotificationCenter.default.addObserver(
+        cancelObserver = NotificationCenter.default.addObserver(
             forName: .LCGameControllerCancel,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             guard let self, self.presentedViewController is UIAlertController else { return }
+            LCGameControllerManager.shared.isQuickActionSheetPresented = false
             self.dismiss(animated: true)
         }
     }
@@ -70,6 +72,9 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
     }
 
     deinit {
+        if let cancelObserver {
+            NotificationCenter.default.removeObserver(cancelObserver)
+        }
         cleanupExportTemporaryDirectory()
     }
 
@@ -113,11 +118,15 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
             preferredStyle: .actionSheet
         )
         appendActions(from: makeContextMenu(), to: alert)
-        alert.addAction(UIAlertAction(title: "lc.common.cancel".loc, style: .cancel))
+        alert.addAction(UIAlertAction(title: "lc.common.cancel".loc, style: .cancel) { _ in
+            LCGameControllerManager.shared.isQuickActionSheetPresented = false
+        })
+        alert.presentationController?.delegate = self
         if let popover = alert.popoverPresentationController {
             popover.sourceView = bannerView
             popover.sourceRect = bannerView.bounds
         }
+        LCGameControllerManager.shared.isQuickActionSheetPresented = true
         present(alert, animated: true)
     }
 
@@ -128,6 +137,7 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
             } else if let action = element as? UIAction {
                 let style: UIAlertAction.Style = action.attributes.contains(.destructive) ? .destructive : .default
                 alert.addAction(UIAlertAction(title: action.title, style: style) { _ in
+                    LCGameControllerManager.shared.isQuickActionSheetPresented = false
                     action.handler?(action)
                 })
             }
@@ -452,6 +462,7 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
     }
 
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        LCGameControllerManager.shared.isQuickActionSheetPresented = false
         cleanupExportTemporaryDirectory()
     }
 
