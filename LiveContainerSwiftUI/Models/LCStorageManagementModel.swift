@@ -270,38 +270,8 @@ final class LCStorageManagementModel: ObservableObject {
     }
 
     nonisolated private static func calculateSize(at url: URL) async throws -> Int64 {
-        let fileManager = FileManager.default
-        let resourceKeys: Set<URLResourceKey> = [
-            .isRegularFileKey,
-            .totalFileAllocatedSizeKey,
-            .fileAllocatedSizeKey,
-            .fileSizeKey
-        ]
-        guard let enumerator = fileManager.enumerator(
-            at: url,
-            includingPropertiesForKeys: Array(resourceKeys),
-            options: [],
-            errorHandler: nil
-        ) else {
-            return 0
-        }
-
-        var totalSize: Int64 = 0
-        for case let fileURL as URL in enumerator {
-            try Task.checkCancellation()
-
-            let resourceValues = try fileURL.resourceValues(forKeys: resourceKeys)
-            guard resourceValues.isRegularFile == true else {
-                continue
-            }
-
-            let fileSize = resourceValues.totalFileAllocatedSize
-                ?? resourceValues.fileAllocatedSize
-                ?? resourceValues.fileSize
-                ?? 0
-            totalSize += Int64(fileSize)
-        }
-
-        return totalSize
+        // Share one implementation with the per-app statistics so both screens
+        // use the same allocation rules and never follow symbolic links.
+        try await LCDiskSizeCalculator.directorySize(at: url)
     }
 }
