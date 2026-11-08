@@ -116,6 +116,23 @@ Unfortunately, not all apps work in LiveContainer, so we have a [compatibility l
 ## Building
 Open Xcode, edit `DEVELOPMENT_TEAM[config=Debug]` in `xcconfigs/Global.xcconfig` to your team id and compile.
 
+## UI folders (this fork)
+This fork adds folders to the app list:
+
+- create one from the sort menu (`New Folder`), rename / pin / delete from the folder's long press menu
+- pin folder rows stay on top of the app list
+- each folder keeps its own sort setting and its own custom order
+- apps can be moved into a folder from the app's context menu (`Move to Folder`) or from the folder's `+` picker; a moved app disappears from the root list
+- searching looks at every app, folders included
+
+Folder assignments are **not** written into the guest app database. They live in
+
+```
+Documents/LCUIFolders.json
+```
+
+so installing the official LiveContainer over this build only makes the folder feature disappear: all apps are back in a single flat list and nothing else breaks. Reinstalling this build restores the folders.
+
 ## Project structure
 ### Main executable
 - Core of LiveContainer
