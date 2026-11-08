@@ -98,6 +98,10 @@ struct LCFolderView: View, LCAppBannerDelegate {
                 gameController.focusedIndex = newValue - 1
             }
         }
+        .onAppear {
+            // Entering a folder starts the focus ring at its first item.
+            gameController.focusedIndex = 0
+        }
         .navigationTitle(folder.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
