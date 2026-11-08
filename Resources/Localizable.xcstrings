@@ -30346,6 +30346,57 @@
         }
       }
     },
+    "lc.sources.lastSync %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last synced: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上次同步：%@"
+          }
+        }
+      }
+    },
+    "lc.sources.noCache.desc" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap Refresh to fetch this repository from the network."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点击“刷新”从网络获取此源的数据。"
+          }
+        }
+      }
+    },
+    "lc.sources.noCache.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No local cache"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无本地缓存"
+          }
+        }
+      }
+    },
     "lc.sources.refresh" : {
       "extractionState" : "stale",
       "localizations" : {
