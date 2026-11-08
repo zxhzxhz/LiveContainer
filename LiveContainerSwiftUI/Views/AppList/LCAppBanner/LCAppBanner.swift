@@ -23,22 +23,34 @@ struct LCAppBanner: UIViewControllerRepresentable {
 
     /// When the banner is shown inside a folder, the id of that folder.
     private var folderId: String?
+    /// Whether the game controller focus ring is on this banner.
+    private var isControllerFocused: Bool
+    /// Incrementing this value asks the banner to present its quick action menu.
+    private var quickActionNonce: Int
 
     @AppStorage("dynamicColors", store: LCUtils.appGroupUserDefault) private var dynamicColors = true
     @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) private var darkModeIcon = false
     private let sharedModel = DataManager.shared.model
 
-    init(appModel: LCAppModel, delegate: LCAppBannerDelegate, folderId: String? = nil) {
+    init(
+        appModel: LCAppModel,
+        delegate: LCAppBannerDelegate,
+        folderId: String? = nil,
+        isControllerFocused: Bool = false,
+        quickActionNonce: Int = 0
+    ) {
         _model = ObservedObject(wrappedValue: appModel)
         self.delegate = delegate
         self.folderId = folderId
+        self.isControllerFocused = isControllerFocused
+        self.quickActionNonce = quickActionNonce
     }
 
     func makeUIViewController(context: Context) -> UIViewController {
-        let viewController = LCAppBannerViewController(delegate: delegate, config: LCAppBannerConfiguration(model: model, dynamicColors: dynamicColors, darkModeIcon: darkModeIcon, folderId: folderId))
+        let viewController = LCAppBannerViewController(delegate: delegate, config: LCAppBannerConfiguration(model: model, dynamicColors: dynamicColors, darkModeIcon: darkModeIcon, folderId: folderId, isControllerFocused: isControllerFocused, quickActionNonce: quickActionNonce))
         // Prime the content before SwiftUI performs its first measurement,
         // otherwise hidden badges would still count towards the available width.
-        viewController.update(model: model, dynamicColors: dynamicColors, darkModeIcon: darkModeIcon, folderId: folderId)
+        viewController.update(model: model, dynamicColors: dynamicColors, darkModeIcon: darkModeIcon, folderId: folderId, isControllerFocused: isControllerFocused, quickActionNonce: quickActionNonce)
         return viewController
     }
 
@@ -50,7 +62,9 @@ struct LCAppBanner: UIViewControllerRepresentable {
             model: model,
             dynamicColors: dynamicColors,
             darkModeIcon: darkModeIcon,
-            folderId: folderId
+            folderId: folderId,
+            isControllerFocused: isControllerFocused,
+            quickActionNonce: quickActionNonce
         )
     }
 

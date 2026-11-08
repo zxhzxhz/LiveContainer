@@ -17,6 +17,7 @@ struct LCFolderView: View, LCAppBannerDelegate {
     @Environment(\.presentationMode) private var presentationMode
 
     @ObservedObject private var folderManager = LCFolderManager.shared
+    @ObservedObject private var gameController = LCGameControllerManager.shared
 
     @StateObject private var renameInput = InputHelper()
     @StateObject private var generatedIconStyleSelector = AlertHelper<GeneratedIconStyle>()
@@ -52,6 +53,7 @@ struct LCFolderView: View, LCAppBannerDelegate {
     }
 
     private func content(for folder: LCFolder) -> some View {
+        ScrollViewReader { scrollProxy in
         ScrollView {
             NavigationLink(
                 destination: navigateTo,
@@ -62,8 +64,14 @@ struct LCFolderView: View, LCAppBannerDelegate {
             .hidden()
 
             LazyVStack {
-                ForEach(apps, id: \.self) { app in
-                    LCAppBanner(appModel: app, delegate: self, folderId: folder.id)
+                ForEach(Array(apps.enumerated()), id: \.element) { index, app in
+                    LCAppBanner(
+                        appModel: app,
+                        delegate: self,
+                        folderId: folder.id,
+                        isControllerFocused: gameController.isFocusRingVisible && gameController.focusedIndex == index
+                    )
+                    .id(app)
                 }
             }
             .padding()
@@ -72,6 +80,22 @@ struct LCFolderView: View, LCAppBannerDelegate {
                 Text("lc.folder.empty".loc)
                     .foregroundColor(.secondary)
                     .padding(.top, 40)
+            }
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 4)
+                .onChanged { _ in
+                    gameController.notifyTouchInteraction()
+                }
+        )
+        .onReceive(gameController.commandPublisher) { command in
+            handleControllerCommand(command, scrollProxy: scrollProxy)
+        }
+        .onChange(of: apps.count) { newValue in
+            if newValue == 0 {
+                gameController.focusedIndex = 0
+            } else if gameController.focusedIndex >= newValue {
+                gameController.focusedIndex = newValue - 1
             }
         }
         .navigationTitle(folder.name)
@@ -168,6 +192,41 @@ struct LCFolderView: View, LCAppBannerDelegate {
             })
         } message: {
             Text(errorInfo)
+        }
+        }
+    }
+
+    private func handleControllerCommand(_ command: LCControllerCommand, scrollProxy: ScrollViewProxy) {
+        // A pushed settings page owns the controller until it is popped.
+        guard !isNavigationActive else {
+            return
+        }
+        let items = apps
+        guard !items.isEmpty else {
+            return
+        }
+        let index = min(max(gameController.focusedIndex, 0), items.count - 1)
+
+        switch command {
+        case .moveUp:
+            let next = max(0, index - 1)
+            gameController.focusedIndex = next
+            withAnimation(.easeInOut(duration: 0.18)) {
+                scrollProxy.scrollTo(items[next], anchor: .center)
+            }
+        case .moveDown:
+            let next = min(items.count - 1, index + 1)
+            gameController.focusedIndex = next
+            withAnimation(.easeInOut(duration: 0.18)) {
+                scrollProxy.scrollTo(items[next], anchor: .center)
+            }
+        case .confirm:
+            Task { try? await items[index].runApp() }
+        case .openSettings:
+            navigateTo = AnyView(LCAppSettingsView(model: items[index]))
+            isNavigationActive = true
+        case .cancel, .contextMenu, .previousTab, .nextTab:
+            break // Handled by the app list or the tab bar
         }
     }
 

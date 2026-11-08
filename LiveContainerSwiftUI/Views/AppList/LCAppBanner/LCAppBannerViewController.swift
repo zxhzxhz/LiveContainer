@@ -12,6 +12,8 @@ struct LCAppBannerConfiguration {
     let dynamicColors: Bool
     let darkModeIcon: Bool
     let folderId: String?
+    let isControllerFocused: Bool
+    let quickActionNonce: Int
 }
 
 
@@ -21,6 +23,7 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
     private let bannerView = LCAppBannerRootView()
     private var configuration: LCAppBannerConfiguration
     private var exportTemporaryDirectory: URL?
+    private var lastHandledQuickActionNonce = 0
     
     init(delegate: LCAppBannerDelegate, config: LCAppBannerConfiguration) {
         self.delegate = delegate
@@ -47,6 +50,16 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
         doubleTapGesture.numberOfTapsRequired = 2
         doubleTapGesture.cancelsTouchesInView = false
         bannerView.addGestureRecognizer(doubleTapGesture)
+
+        // The B button must be able to close a menu opened by the X button.
+        NotificationCenter.default.addObserver(
+            forName: .LCGameControllerCancel,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, self.presentedViewController is UIAlertController else { return }
+            self.dismiss(animated: true)
+        }
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
@@ -64,16 +77,61 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
         model: LCAppModel,
         dynamicColors: Bool,
         darkModeIcon: Bool,
-        folderId: String? = nil
+        folderId: String? = nil,
+        isControllerFocused: Bool = false,
+        quickActionNonce: Int = 0
     ) {
         loadViewIfNeeded()
         configuration = LCAppBannerConfiguration(
             model: model,
             dynamicColors: dynamicColors,
             darkModeIcon: darkModeIcon,
-            folderId: folderId
+            folderId: folderId,
+            isControllerFocused: isControllerFocused,
+            quickActionNonce: quickActionNonce
         )
         refreshView()
+        bannerView.setControllerFocused(isControllerFocused)
+
+        if quickActionNonce > lastHandledQuickActionNonce {
+            lastHandledQuickActionNonce = quickActionNonce
+            DispatchQueue.main.async { [weak self] in
+                self?.presentQuickActionSheet()
+            }
+        }
+    }
+
+    /// Presents the same actions as the long-press context menu, as a sheet the
+    /// game controller can navigate with the D-Pad.
+    func presentQuickActionSheet() {
+        guard viewIfLoaded?.window != nil, presentedViewController == nil else {
+            return
+        }
+        let alert = UIAlertController(
+            title: configuration.model.displayName,
+            message: nil,
+            preferredStyle: .actionSheet
+        )
+        appendActions(from: makeContextMenu(), to: alert)
+        alert.addAction(UIAlertAction(title: "lc.common.cancel".loc, style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = bannerView
+            popover.sourceRect = bannerView.bounds
+        }
+        present(alert, animated: true)
+    }
+
+    private func appendActions(from menu: UIMenu, to alert: UIAlertController) {
+        for element in menu.children {
+            if let submenu = element as? UIMenu {
+                appendActions(from: submenu, to: alert)
+            } else if let action = element as? UIAction {
+                let style: UIAlertAction.Style = action.attributes.contains(.destructive) ? .destructive : .default
+                alert.addAction(UIAlertAction(title: action.title, style: style) { _ in
+                    action.handler?(action)
+                })
+            }
+        }
     }
 
     private func refreshView() {
