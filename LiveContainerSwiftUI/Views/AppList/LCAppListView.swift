@@ -325,6 +325,14 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 if !didAppear {
                     onAppear()
                 }
+                // Returning from a folder or a settings page may leave the
+                // controller focus index beyond the current list.
+                let count = focusableItems.count
+                if count == 0 {
+                    gameController.focusedIndex = 0
+                } else if gameController.focusedIndex >= count {
+                    gameController.focusedIndex = count - 1
+                }
             }
             
             .navigationTitle("lc.appList.myApps".loc)

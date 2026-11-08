@@ -45,6 +45,7 @@ final class LCGameControllerManager: ObservableObject {
     private let thumbstickReleaseZone: Float = 0.25
     private let selectionFeedback = UISelectionFeedbackGenerator()
     private var boundControllers: Set<ObjectIdentifier> = []
+    private var pendingBindRetries: Set<ObjectIdentifier> = []
 
     private init() {
         setupNotifications()
@@ -104,6 +105,18 @@ final class LCGameControllerManager: ObservableObject {
     private func bindController(_ controller: GCController) {
         let identifier = ObjectIdentifier(controller)
         guard !boundControllers.contains(identifier) else {
+            return
+        }
+        // The input profile can arrive a moment after the connect notification.
+        guard controller.extendedGamepad != nil || controller.microGamepad != nil else {
+            if pendingBindRetries.insert(identifier).inserted {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    Task { @MainActor in
+                        self?.pendingBindRetries.remove(identifier)
+                        self?.refreshConnectedControllers()
+                    }
+                }
+            }
             return
         }
         boundControllers.insert(identifier)
