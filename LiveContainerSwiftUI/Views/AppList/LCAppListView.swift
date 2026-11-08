@@ -870,9 +870,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         result.model.delegate = self
         if let signError = result.signError {
             if result.signSucceeded {
-                errorInfo = "lc.appList.signSuccessWithError".loc + "
-
-" + signError
+                errorInfo = "\("lc.appList.signSuccessWithError".loc)\n\n\(signError)"
             } else {
                 errorInfo = signError.loc
             }
