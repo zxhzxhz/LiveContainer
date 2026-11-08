@@ -138,7 +138,13 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
                 let style: UIAlertAction.Style = action.attributes.contains(.destructive) ? .destructive : .default
                 alert.addAction(UIAlertAction(title: action.title, style: style) { _ in
                     LCGameControllerManager.shared.isQuickActionSheetPresented = false
-                    action.handler?(action)
+                    if #available(iOS 16.0, *) {
+                        action.performWithSender(nil, target: nil)
+                    } else if let block = action.value(forKey: "handler") {
+                        typealias ActionBlock = @convention(block) (UIAction) -> Void
+                        let handler = unsafeBitCast(block as AnyObject, to: ActionBlock.self)
+                        handler(action)
+                    }
                 })
             }
         }

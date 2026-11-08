@@ -126,7 +126,7 @@ enum LCDiskSizeCalculator {
             dataSum += containerSize
         }
 
-        let bundleSize = (try? await bundleSizeTask) ?? 0
+        let bundleSize = await bundleSizeTask
         return LCAppDiskUsageResult(
             appBundleBytes: bundleSize,
             totalDataBytes: dataSum,
