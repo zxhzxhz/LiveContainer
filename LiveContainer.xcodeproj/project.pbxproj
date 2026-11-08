@@ -252,6 +252,7 @@
 		E1292C202DCA48F00065E12D /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				LCBackgroundKeepAlive.h,
 				Tweaks.h,
 			);
 			target = E1292BD52DCA3B660065E12D /* LiveContainerShared */;

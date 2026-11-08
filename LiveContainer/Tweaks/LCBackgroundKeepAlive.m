@@ -176,13 +176,17 @@ static id<LCBackgroundTaskApplication> LCSharedApplication(void) {
 }
 
 - (void)onAppDidEnterBackground:(NSNotification *)notification {
-    atomic_store_explicit(&gLCIsInBackground, true, memory_order_release);
+    if (atomic_exchange_explicit(&gLCIsInBackground, true, memory_order_acq_rel)) {
+        return;
+    }
     [self acquireSystemBackgroundTaskAssertion];
     [self startSilentAudioSession];
 }
 
 - (void)onAppWillEnterForeground:(NSNotification *)notification {
-    atomic_store_explicit(&gLCIsInBackground, false, memory_order_release);
+    if (!atomic_exchange_explicit(&gLCIsInBackground, false, memory_order_acq_rel)) {
+        return;
+    }
     [self stopSilentAudioSession];
     [self releaseSystemBackgroundTaskAssertion];
 }
@@ -234,33 +238,51 @@ static id<LCBackgroundTaskApplication> LCSharedApplication(void) {
     NSError *error = nil;
     AVAudioSession *session = [AVAudioSession sharedInstance];
     // MixWithOthers keeps the guest app's own audio working and never takes
-    // playback focus away from other apps.
-    [session setCategory:AVAudioSessionCategoryPlayback
-             withOptions:AVAudioSessionCategoryOptionMixWithOthers
-                   error:&error];
+    // playback focus away from other apps. Preserve PlayAndRecord if the guest
+    // app is using microphone input.
+    if ([session.category isEqualToString:AVAudioSessionCategoryPlayAndRecord]) {
+        AVAudioSessionCategoryOptions options = session.categoryOptions
+            | AVAudioSessionCategoryOptionMixWithOthers
+            | AVAudioSessionCategoryOptionDefaultToSpeaker;
+        [session setCategory:AVAudioSessionCategoryPlayAndRecord
+                 withOptions:options
+                       error:&error];
+    } else {
+        [session setCategory:AVAudioSessionCategoryPlayback
+                 withOptions:AVAudioSessionCategoryOptionMixWithOthers
+                       error:&error];
+    }
     [session setActive:YES error:&error];
 
-    if (!self.audioEngine.isRunning) {
-        [self.audioEngine prepare];
-        [self.audioEngine startAndReturnError:&error];
-    }
-    if (!self.playerNode.isPlaying && self.silentBuffer) {
-        [self.playerNode scheduleBuffer:self.silentBuffer
-                                 atTime:nil
-                                options:AVAudioPlayerNodeBufferLoops
-                      completionHandler:nil];
-        [self.playerNode play];
+    @try {
+        if (!self.audioEngine.isRunning) {
+            [self.audioEngine prepare];
+            [self.audioEngine startAndReturnError:&error];
+        }
+        if (self.audioEngine.isRunning && !self.playerNode.isPlaying && self.silentBuffer) {
+            [self.playerNode scheduleBuffer:self.silentBuffer
+                                     atTime:nil
+                                    options:AVAudioPlayerNodeBufferLoops
+                          completionHandler:nil];
+            [self.playerNode play];
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"[LCBackgroundKeepAlive] Failed to start silent audio engine: %@", exception);
     }
 }
 
 - (void)stopSilentAudioSession {
     // Do not deactivate the shared audio session here: the guest app may still
     // be using it, and deactivating would cut its audio output.
-    if (self.playerNode.isPlaying) {
-        [self.playerNode stop];
-    }
-    if (self.audioEngine.isRunning) {
-        [self.audioEngine pause];
+    @try {
+        if (self.playerNode.isPlaying) {
+            [self.playerNode stop];
+        }
+        if (self.audioEngine.isRunning) {
+            [self.audioEngine pause];
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"[LCBackgroundKeepAlive] Failed to stop silent audio engine: %@", exception);
     }
 }
 
@@ -280,12 +302,11 @@ void initBackgroundKeepAlive(void) {
 
     LCBackgroundKeepAliveManager *manager = [LCBackgroundKeepAliveManager shared];
     NSNotificationCenter *notificationCenter = [NSNotificationCenter defaultCenter];
+    [notificationCenter addObserver:manager selector:@selector(onAppDidEnterBackground:) name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [notificationCenter addObserver:manager selector:@selector(onAppWillEnterForeground:) name:UIApplicationWillEnterForegroundNotification object:nil];
     if (NSUserDefaults.isLiveProcess) {
         [notificationCenter addObserver:manager selector:@selector(onAppDidEnterBackground:) name:NSExtensionHostDidEnterBackgroundNotification object:nil];
         [notificationCenter addObserver:manager selector:@selector(onAppWillEnterForeground:) name:NSExtensionHostWillEnterForegroundNotification object:nil];
-    } else {
-        [notificationCenter addObserver:manager selector:@selector(onAppDidEnterBackground:) name:UIApplicationDidEnterBackgroundNotification object:nil];
-        [notificationCenter addObserver:manager selector:@selector(onAppWillEnterForeground:) name:UIApplicationWillEnterForegroundNotification object:nil];
     }
 
     [notificationCenter addObserverForName:AVAudioSessionInterruptionNotification

@@ -41,6 +41,7 @@ struct LCAppSettingsView: View {
     @State private var diskUsage: LCAppDiskUsageResult? = nil
     @State private var isCalculatingDiskUsage = false
     @State private var diskCalculationTask: Task<Void, Never>? = nil
+    @AppStorage("LCBackgroundKeepAliveEnabled", store: LCUtils.appGroupUserDefault) private var backgroundKeepAliveEnabled = false
 
     @EnvironmentObject private var sharedModel : SharedModel
     
@@ -320,7 +321,7 @@ struct LCAppSettingsView: View {
                 Toggle(isOn: $model.uiEnableBackgroundKeepAlive) {
                     Text("lc.appSettings.backgroundKeepAlive".loc)
                 }
-                .disabled(!LCUtils.appGroupUserDefault.bool(forKey: "LCBackgroundKeepAliveEnabled"))
+                .disabled(!backgroundKeepAliveEnabled)
                 Toggle(isOn: $model.uiUseLCBundleId) {
                     Text("lc.appSettings.useLCBundleId".loc)
                 }
@@ -526,7 +527,7 @@ struct LCAppSettingsView: View {
             diskCalculationTask = nil
             isCalculatingDiskUsage = false
         }
-        .onChange(of: model.uiContainers.count) { _ in
+        .onChange(of: model.uiContainers.map(\.folderName)) { _ in
             refreshDiskUsageStatistics()
         }
     }

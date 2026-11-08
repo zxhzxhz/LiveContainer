@@ -649,6 +649,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         
     }
     func onAppear() {
+        LCAppInstallerService.shared.defaultAppDelegate = self
         for app in sharedModel.apps {
             app.delegate = self
         }
@@ -1383,6 +1384,10 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         guard sharedModel.selectedTab == .apps else {
             return
         }
+        // While a folder detail page is active, it owns all controller commands.
+        if gameController.isInFolderView {
+            return
+        }
         // Pushed pages own the focus ring; B pops back like the navigation bar.
         if isNavigationActive {
             if command == .cancel {
@@ -1424,7 +1429,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             case .folder(let folderId):
                 openFolder(folderId: folderId)
             case .app(let app):
-                Task { try? await app.runApp() }
+                Task { await launchAppFromController(app) }
             }
         case .cancel:
             if !searchContext.query.isEmpty {
@@ -1441,6 +1446,40 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             }
         case .previousTab, .nextTab:
             break // Handled by LCTabView
+        }
+    }
+
+    private func launchAppFromController(_ app: LCAppModel) async {
+        if #available(iOS 16.0, *),
+           let currentDataFolder = app.uiSelectedContainer?.folderName,
+           MultitaskManager.isUsing(container: currentDataFolder) {
+            var found = false
+            if #available(iOS 16.1, *) {
+                found = MultitaskWindowManager.openExistingAppWindow(dataUUID: currentDataFolder)
+            }
+            if !found {
+                found = MultitaskDockManager.shared.bringMultitaskViewToFront(uuid: currentDataFolder)
+            }
+            if found {
+                return
+            }
+        }
+        if app.appInfo.isLocked && !sharedModel.isHiddenAppUnlocked {
+            do {
+                if !(try await LCUtils.authenticateUser()) {
+                    return
+                }
+            } catch {
+                errorInfo = error.localizedDescription
+                errorShow = true
+                return
+            }
+        }
+        do {
+            try await app.runApp()
+        } catch {
+            errorInfo = error.localizedDescription
+            errorShow = true
         }
     }
     
