@@ -599,6 +599,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         SecItemGuestHooksInit();
         NSFMGuestHooksInit();
         initDead10ccFix();
+        initBackgroundKeepAlive();
     }
     if(isLiveProcess) {
         NSURLSCGuestHooksInit();

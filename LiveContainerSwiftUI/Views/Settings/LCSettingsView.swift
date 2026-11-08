@@ -52,6 +52,7 @@ struct LCSettingsView: View {
     @AppStorage("LCOpenWebPageWithoutAsking") var silentOpenWebPage = false
     @AppStorage("LCDontSignApp", store: LCUtils.appGroupUserDefault) var dontSignApp = false
     @AppStorage("LCStrictHiding", store: LCUtils.appGroupUserDefault) var strictHiding = false
+    @AppStorage("LCBackgroundKeepAliveEnabled", store: LCUtils.appGroupUserDefault) var backgroundKeepAliveEnabled = false
     @AppStorage("dynamicColors", store: LCUtils.appGroupUserDefault) var dynamicColors = true
     @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) var darkModeIcon = false
     
@@ -305,6 +306,14 @@ struct LCSettingsView: View {
                     Text("lc.common.miscellaneous".loc)
                 } footer: {
                     Text("lc.settings.FrameIconDesc".loc)
+                }
+
+                Section {
+                    Toggle(isOn: $backgroundKeepAliveEnabled) {
+                        Text("lc.settings.backgroundKeepAlive".loc)
+                    }
+                } footer: {
+                    Text("lc.settings.backgroundKeepAliveDesc".loc)
                 }
                 
                 Section {

@@ -659,6 +659,15 @@
     [self save];
 }
 
+- (bool)enableBackgroundKeepAlive {
+    return [_info[@"enableBackgroundKeepAlive"] boolValue];
+}
+
+- (void)setEnableBackgroundKeepAlive:(bool)enableBackgroundKeepAlive {
+    _info[@"enableBackgroundKeepAlive"] = @(enableBackgroundKeepAlive);
+    [self save];
+}
+
 - (LCOrientationLock)orientationLock {
     return (LCOrientationLock) [((NSNumber*) _info[@"LCOrientationLock"]) intValue];
 }

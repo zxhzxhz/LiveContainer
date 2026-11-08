@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <spawn.h>
 #include <dlfcn.h>
+#import "LCBackgroundKeepAlive.h"
 @import Foundation;
 
 //extern int _sqlite3_lockstate(const char *path, int pid);
@@ -22,6 +23,7 @@
 @property(nonatomic) BOOL methodInited;
 @property(nonatomic) int deboundeToken;
 - (void)handleAppDidEnterBackground:(NSNotification *)notification;
+- (void)handleAppDidEnterBackgroundReal;
 - (void)_handleTaskCompletionAndTerminate:(id)arg1;
 @end
 @interface UIApplication : NSObject
@@ -196,6 +198,13 @@ void initDead10ccFix(void) {
 }
 
 - (void)handleAppDidEnterBackground:(NSNotification *)notification {
+    // When the app opted into background keep-alive we must not run the
+    // terminate-after-background-task dance; only tag locked files so
+    // runningboard does not treat them as a deadlock.
+    if (LCIsBackgroundKeepAliveEnabled()) {
+        [self handleAppDidEnterBackgroundReal];
+        return;
+    }
     if(!_methodInited) {
         _methodInited = YES;
         // hack: steal -[UIApplication _handleTaskCompletionAndTerminate:]
