@@ -36,6 +36,9 @@ struct LCAppBanner: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIViewController {
         let viewController = LCAppBannerViewController(delegate: delegate, config: LCAppBannerConfiguration(model: model, dynamicColors: dynamicColors, darkModeIcon: darkModeIcon, folderId: folderId))
+        // Prime the content before SwiftUI performs its first measurement,
+        // otherwise hidden badges would still count towards the available width.
+        viewController.update(model: model, dynamicColors: dynamicColors, darkModeIcon: darkModeIcon, folderId: folderId)
         return viewController
     }
 
@@ -53,8 +56,13 @@ struct LCAppBanner: UIViewControllerRepresentable {
 
     @available(iOS 16.0, *)
     func sizeThatFits(_ proposal: ProposedViewSize, uiViewController: UIViewController, context: Context) -> CGSize? {
-        guard let width = proposal.width else {
+        guard let width = proposal.width, width > 0 else {
             return nil
+        }
+        if let bannerVC = uiViewController as? LCAppBannerViewController {
+            // Let the banner measure its own content so two-line names or a
+            // remark never get clipped by the compact 88pt height.
+            return CGSize(width: width, height: bannerVC.preferredBannerHeight(forWidth: width))
         }
         return CGSize(width: width, height: LCAppBannerRootView.bannerHeight)
     }

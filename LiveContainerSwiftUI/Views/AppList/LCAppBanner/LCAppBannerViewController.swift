@@ -84,6 +84,24 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
             darkModeIcon: configuration.darkModeIcon,
             traitCollection: traitCollection
         )
+        updatePreferredContentSize()
+    }
+
+    /// Height for the given width, used by SwiftUI's sizeThatFits.
+    func preferredBannerHeight(forWidth width: CGFloat) -> CGFloat {
+        loadViewIfNeeded()
+        return bannerView.preferredHeight(forWidth: width)
+    }
+
+    private func updatePreferredContentSize() {
+        let width = view.bounds.width
+        guard width > 0 else {
+            return
+        }
+        let height = bannerView.preferredHeight(forWidth: width)
+        if abs(preferredContentSize.height - height) > 0.5 {
+            preferredContentSize = CGSize(width: preferredContentSize.width, height: height)
+        }
     }
 
     @objc private func bannerDoubleTapped(_ gestureRecognizer: UITapGestureRecognizer) {

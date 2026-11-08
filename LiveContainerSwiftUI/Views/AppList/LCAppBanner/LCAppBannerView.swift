@@ -58,12 +58,25 @@ final class LCAppBannerRootView: UIView {
         iconImageView.isAccessibilityElement = false
 
         configureLabel(nameLabel, font: .systemFont(ofSize: 16, weight: .bold))
+        // Long display names must stay readable instead of being tail-truncated:
+        // allow two lines and shrink the font slightly before cutting anything.
+        nameLabel.numberOfLines = 2
+        nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.adjustsFontSizeToFitWidth = true
+        nameLabel.minimumScaleFactor = 0.78
+        nameLabel.allowsDefaultTighteningForTruncation = true
         configureLabel(versionLabel, font: .systemFont(ofSize: 12))
         configureLabel(remarkLabel, font: .systemFont(ofSize: 10))
         configureLabel(containerLabel, font: .systemFont(ofSize: 8))
 
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        nameLabel.setContentHuggingPriority(.required, for: .horizontal)
+        nameLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        nameLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+        for badge in [sharedBadge, jitBadge, bit32Badge, lockBadge] {
+            // Badges must never be squeezed by a wrapping name.
+            badge.setContentCompressionResistancePriority(.required, for: .horizontal)
+            badge.setContentHuggingPriority(.required, for: .horizontal)
+        }
         nameSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         nameSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         nameStack.translatesAutoresizingMaskIntoConstraints = false
@@ -95,6 +108,13 @@ final class LCAppBannerRootView: UIView {
         addSubview(detailStack)
         addSubview(runControl)
 
+        let detailTopConstraint = detailStack.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 10)
+        let detailBottomConstraint = detailStack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -10)
+        // Keep these breakable so a transient frame shorter than the measured
+        // height never produces unsatisfiable-constraint logs.
+        detailTopConstraint.priority = UILayoutPriority(999)
+        detailBottomConstraint.priority = UILayoutPriority(999)
+
         NSLayoutConstraint.activate([
             visualBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
             visualBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -109,12 +129,54 @@ final class LCAppBannerRootView: UIView {
             detailStack.leadingAnchor.constraint(equalTo: iconImageView.trailingAnchor, constant: 10),
             detailStack.trailingAnchor.constraint(lessThanOrEqualTo: runControl.leadingAnchor, constant: -10),
             detailStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            detailTopConstraint,
+            detailBottomConstraint,
 
             runControl.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             runControl.centerYAnchor.constraint(equalTo: centerYAnchor),
             runControl.widthAnchor.constraint(equalToConstant: 70),
             runControl.heightAnchor.constraint(equalToConstant: 32)
         ])
+    }
+
+    /// Horizontal space taken by paddings, the icon and the run button.
+    private static let nonTextHorizontalSpace: CGFloat = 178
+
+    /// Horizontal space currently occupied by the visible badges
+    /// (16pt each plus the 8pt stack spacing).
+    private var activeBadgesWidth: CGFloat {
+        var total: CGFloat = 0
+        for badge in [sharedBadge, jitBadge, bit32Badge, lockBadge] where !badge.isHidden {
+            total += 24
+        }
+        return total
+    }
+
+    /// Height needed to show the given width without clipping the name or the
+    /// remark, never smaller than the compact banner height.
+    func preferredHeight(forWidth width: CGFloat) -> CGFloat {
+        guard width > 0 else {
+            return Self.bannerHeight
+        }
+        let availableStackWidth = max(80, width - Self.nonTextHorizontalSpace)
+        nameLabel.preferredMaxLayoutWidth = max(60, availableStackWidth - activeBadgesWidth)
+
+        let fittedHeight = systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height
+        return max(Self.bannerHeight, ceil(fittedHeight))
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Rotation or iPad split view changes the available width after the
+        // initial measurement; keep the wrapping width in sync.
+        let stackWidth = detailStack.bounds.width
+        if stackWidth > 0 {
+            nameLabel.preferredMaxLayoutWidth = max(60, stackWidth - activeBadgesWidth)
+        }
     }
 
     private func configureLabel(_ label: UILabel, font: UIFont) {
