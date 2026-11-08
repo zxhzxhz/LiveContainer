@@ -5,6 +5,7 @@
 //  Created by s s on 2024/8/21.
 //
 
+import Combine
 import Foundation
 import SwiftUI
 
@@ -15,12 +16,37 @@ struct LCTabView: View {
     
     @EnvironmentObject var sharedModel : SharedModel
     @EnvironmentObject var sceneDelegate: SceneDelegate
+    @ObservedObject private var gameController = LCGameControllerManager.shared
     @State var shouldToggleMainWindowOpen = false
     @Environment(\.scenePhase) var scenePhase
     @StateObject var downloadHelper = DownloadHelper()
 
     let pub = NotificationCenter.default.publisher(for: UIScene.didDisconnectNotification)
     
+    /// Tabs actually shown for the current environment, in display order.
+    private var availableTabs: [LCTabIdentifier] {
+        var tabs: [LCTabIdentifier] = []
+        if DataManager.shared.model.multiLCStatus != 2 {
+            tabs.append(.sources)
+        }
+        tabs.append(.apps)
+        if DataManager.shared.model.multiLCStatus != 2 {
+            tabs.append(.tweaks)
+        }
+        tabs.append(.settings)
+        return tabs
+    }
+
+    private func switchTab(by offset: Int) {
+        let tabs = availableTabs
+        guard !tabs.isEmpty,
+              let current = tabs.firstIndex(of: sharedModel.selectedTab) else {
+            return
+        }
+        let next = (current + offset + tabs.count) % tabs.count
+        sharedModel.selectedTab = tabs[next]
+    }
+
     var body: some View {
         TabView(selection: $sharedModel.selectedTab) {
             if DataManager.shared.model.multiLCStatus != 2 {
@@ -51,6 +77,16 @@ struct LCTabView: View {
         }
         .downloadAlert(helper: downloadHelper)
         .environmentObject(downloadHelper)
+        .onReceive(gameController.commandPublisher) { command in
+            switch command {
+            case .previousTab:
+                switchTab(by: -1)
+            case .nextTab:
+                switchTab(by: 1)
+            default:
+                break
+            }
+        }
         .alert("lc.common.error".loc, isPresented: $errorShow){
             Button("lc.common.ok".loc, action: {
             })

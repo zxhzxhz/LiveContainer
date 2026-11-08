@@ -94,7 +94,12 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) private var darkModeIcon = false
     
     @State private var isViewAppeared = false
-    
+
+    // Game controller focus state
+    @ObservedObject private var gameController = LCGameControllerManager.shared
+    @State private var controllerActionApp: LCAppModel?
+    @State private var quickActionNonce = 0
+
     @ObservedObject var searchContext: SearchContext = SearchContext()
     var sortedApps: [LCAppModel] {
         return sharedAppSortManager.sortedApps
@@ -158,12 +163,35 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         return folderManager.appCount(in: folder, from: sharedModel.apps)
     }
 
+    // MARK: - Game controller focus
+
+    private enum FocusableHomeItem: Hashable {
+        case folder(String)
+        case app(LCAppModel)
+    }
+
+    /// Folders first, then root-level apps - exactly the order they are drawn.
+    private var focusableItems: [FocusableHomeItem] {
+        var items: [FocusableHomeItem] = displayedFolders.map { .folder($0.id) }
+        items.append(contentsOf: visibleApps.map { .app($0) })
+        return items
+    }
+
+    private func isFocused(_ item: FocusableHomeItem) -> Bool {
+        guard gameController.isFocusRingVisible,
+              let index = focusableItems.firstIndex(of: item) else {
+            return false
+        }
+        return gameController.focusedIndex == index
+    }
+
     init() {
         _installOptions = State(initialValue: [])
     }
     
     var body: some View {
         NavigationView {
+            ScrollViewReader { scrollProxy in
             ScrollView {
                 NavigationLink(
                     destination: navigateTo,
@@ -178,6 +206,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                         LCFolderBanner(
                             folder: folder,
                             appCount: folderAppCount(folder),
+                            isControllerFocused: isFocused(.folder(folder.id)),
                             onRename: {
                                 promptRenameFolder(folder)
                             },
@@ -188,14 +217,22 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                                 folderToDelete = folder
                             }
                         )
+                        .id(FocusableHomeItem.folder(folder.id))
                         .onTapGesture {
+                            gameController.notifyTouchInteraction()
                             openFolder(folderId: folder.id)
                         }
                     }
                     .transition(.scale)
 
                     ForEach(visibleApps, id: \.self) { app in
-                        LCAppBanner(appModel: app, delegate: self)
+                        LCAppBanner(
+                            appModel: app,
+                            delegate: self,
+                            isControllerFocused: isFocused(.app(app)),
+                            quickActionNonce: controllerActionApp == app ? quickActionNonce : 0
+                        )
+                        .id(FocusableHomeItem.app(app))
                     }
                     .transition(.scale)
                 }
@@ -268,6 +305,22 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             }
             .navigationBarProgressBar(show:$installprogressVisible, progress: $installProgressPercentage)
             .coordinateSpace(name: "scroll")
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 4)
+                    .onChanged { _ in
+                        gameController.notifyTouchInteraction()
+                    }
+            )
+            .onReceive(gameController.commandPublisher) { command in
+                handleControllerCommand(command, scrollProxy: scrollProxy)
+            }
+            .onChange(of: focusableItems.count) { newValue in
+                if newValue == 0 {
+                    gameController.focusedIndex = 0
+                } else if gameController.focusedIndex >= newValue {
+                    gameController.focusedIndex = newValue - 1
+                }
+            }
             .onAppear {
                 if !didAppear {
                     onAppear()
@@ -354,6 +407,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                         Label("Sort by", systemImage: "line.3.horizontal.decrease.circle")
                     }
                 }
+            }
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
@@ -1387,6 +1441,73 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     func closeNavigationView() {
         isNavigationActive = false
         navigateTo = nil
+    }
+
+    // MARK: - Game controller commands
+
+    private func handleControllerCommand(_ command: LCControllerCommand, scrollProxy: ScrollViewProxy) {
+        guard sharedModel.selectedTab == .apps else {
+            return
+        }
+        // Pushed pages own the focus ring; B pops back like the navigation bar.
+        if isNavigationActive {
+            if command == .cancel {
+                closeNavigationView()
+            }
+            return
+        }
+        // Never hijack the controller while a modal or the in-app browser is up.
+        guard !webViewOpened,
+              !jitAlert.show,
+              !helpPresent,
+              !customSortViewPresent,
+              !installReplaceAlert.show,
+              !MultitaskManager.isMultitasking() else {
+            return
+        }
+
+        let items = focusableItems
+        guard !items.isEmpty else {
+            return
+        }
+        let clampedIndex = min(max(gameController.focusedIndex, 0), items.count - 1)
+
+        switch command {
+        case .moveUp:
+            let next = max(0, clampedIndex - 1)
+            gameController.focusedIndex = next
+            withAnimation(.easeInOut(duration: 0.18)) {
+                scrollProxy.scrollTo(items[next], anchor: .center)
+            }
+        case .moveDown:
+            let next = min(items.count - 1, clampedIndex + 1)
+            gameController.focusedIndex = next
+            withAnimation(.easeInOut(duration: 0.18)) {
+                scrollProxy.scrollTo(items[next], anchor: .center)
+            }
+        case .confirm:
+            switch items[clampedIndex] {
+            case .folder(let folderId):
+                openFolder(folderId: folderId)
+            case .app(let app):
+                Task { try? await app.runApp() }
+            }
+        case .cancel:
+            if !searchContext.query.isEmpty {
+                searchContext.query = ""
+            }
+        case .contextMenu:
+            if case .app(let app) = items[clampedIndex] {
+                controllerActionApp = app
+                quickActionNonce += 1
+            }
+        case .openSettings:
+            if case .app(let app) = items[clampedIndex] {
+                openNavigationView(view: AnyView(LCAppSettingsView(model: app)))
+            }
+        case .previousTab, .nextTab:
+            break // Handled by LCTabView
+        }
     }
     
     func copyError() {
