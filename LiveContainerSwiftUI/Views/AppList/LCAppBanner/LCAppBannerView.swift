@@ -172,7 +172,7 @@ final class LCAppBannerRootView: UIView {
             return Self.bannerHeight
         }
         let availableStackWidth = max(80, width - Self.nonTextHorizontalSpace)
-        nameLabel.preferredMaxLayoutWidth = max(60, availableStackWidth - activeBadgesWidth)
+        setPreferredMaxLayoutWidth(max(60, availableStackWidth - activeBadgesWidth))
 
         let fittedHeight = systemLayoutSizeFitting(
             CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
@@ -188,7 +188,15 @@ final class LCAppBannerRootView: UIView {
         // initial measurement; keep the wrapping width in sync.
         let stackWidth = detailStack.bounds.width
         if stackWidth > 0 {
-            nameLabel.preferredMaxLayoutWidth = max(60, stackWidth - activeBadgesWidth)
+            setPreferredMaxLayoutWidth(max(60, stackWidth - activeBadgesWidth))
+        }
+    }
+
+    /// Updating preferredMaxLayoutWidth invalidates the label's intrinsic size,
+    /// so only touch it when the value actually changed to avoid layout loops.
+    private func setPreferredMaxLayoutWidth(_ width: CGFloat) {
+        if abs(nameLabel.preferredMaxLayoutWidth - width) > 0.5 {
+            nameLabel.preferredMaxLayoutWidth = width
         }
     }
 
