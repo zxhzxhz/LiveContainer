@@ -11,6 +11,7 @@ struct LCAppBannerConfiguration {
     let model: LCAppModel
     let dynamicColors: Bool
     let darkModeIcon: Bool
+    let folderId: String?
 }
 
 
@@ -62,13 +63,15 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
     func update(
         model: LCAppModel,
         dynamicColors: Bool,
-        darkModeIcon: Bool
+        darkModeIcon: Bool,
+        folderId: String? = nil
     ) {
         loadViewIfNeeded()
         configuration = LCAppBannerConfiguration(
             model: model,
             dynamicColors: dynamicColors,
-            darkModeIcon: darkModeIcon
+            darkModeIcon: darkModeIcon,
+            folderId: folderId
         )
         refreshView()
     }
@@ -148,6 +151,11 @@ final class LCAppBannerViewController: UIViewController, UIContextMenuInteractio
                 }
             }
             menuChildren.append(UIMenu(title: "Containers", options: .displayInline, children: containerActions))
+        }
+
+        // 1.5 Folder section (move to / move out of folder)
+        if let folderMenu = delegate.folderContextMenu(app: model, folderId: configuration.folderId) {
+            menuChildren.append(folderMenu)
         }
 
         // 2. Main Section
