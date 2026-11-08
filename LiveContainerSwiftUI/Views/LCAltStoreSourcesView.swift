@@ -120,13 +120,22 @@ final class AltStoreSourcesViewModel: ObservableObject {
         var source: AltStoreSource?
         var isLoading: Bool
         var error: String?
-        
-        init(url: URL, isLoading: Bool = false, source: AltStoreSource? = nil, error: String? = nil) {
+        var lastUpdated: Date?
+
+        /// Whether this source already has data decoded from the on-disk cache.
+        /// A source without cache must not be refreshed automatically; the user
+        /// is asked to tap Sync instead.
+        var hasLocalCache: Bool {
+            source != nil
+        }
+
+        init(url: URL, isLoading: Bool = false, source: AltStoreSource? = nil, error: String? = nil, lastUpdated: Date? = nil) {
             self.url = url
             self.id = url
             self.isLoading = isLoading
             self.source = source
             self.error = error
+            self.lastUpdated = lastUpdated
         }
         
         var displayName: String {
@@ -153,14 +162,15 @@ final class AltStoreSourcesViewModel: ObservableObject {
     @Published private(set) var sources: [SourceItem] = []
     @Published var isRefreshingAll = false
     private let defaultsKey = "LCAltStoreSourceURLs"
+    private let lastUpdatedKey = "LCAltStoreSourceLastUpdatedMap"
 
     private let cacheDirectoryName = "AltStoreSourceCache"
-    
+
     init() {
+        // Only load the persisted source list and its on-disk cache here.
+        // Network refreshes must stay user-initiated so that a cold start or
+        // switching to the Sources tab never triggers silent requests.
         loadStoredSources()
-        Task {
-            await refreshAllSources()
-        }
     }
     
     func addSource(from rawValue: String) async -> String? {
@@ -172,8 +182,9 @@ final class AltStoreSourcesViewModel: ObservableObject {
             return "lc.sources.error.duplicate".loc
         }
         
-        sources.append(SourceItem(url: normalizedURL, isLoading: true))
+        sources.append(SourceItem(url: normalizedURL, isLoading: false))
         persistSources()
+        // A newly added source has no cache yet, so fetch it once for the user.
         await refreshSource(url: normalizedURL)
         return nil
     }
@@ -205,20 +216,19 @@ final class AltStoreSourcesViewModel: ObservableObject {
         }
         sources[index].isLoading = true
         sources[index].error = nil
-        let previousData = cachedData(for: url)
         do {
-            let (source, data) = try await AltStoreSourceLoader.load(from: url)
+            let (source, data) = try await AltStoreSourceLoader.load(from: url, ignoreCache: true)
             guard let sourceIndex = sources.firstIndex(where: { $0.url == url }) else {
                 return
             }
-            if let previousData, previousData == data {
-                sources[sourceIndex].isLoading = false
-                return
-            }
+            let now = Date()
             sources[sourceIndex].source = source
+            sources[sourceIndex].lastUpdated = now
             sources[sourceIndex].isLoading = false
-            storeCache(data, for: url)
+            storeCache(data, for: url, updatedAt: now)
         } catch {
+            // Keep whatever cache we already decoded: a failed manual refresh
+            // must never blank out a previously rendered source.
             if let sourceIndex = sources.firstIndex(where: { $0.url == url }) {
                 sources[sourceIndex].error = error.localizedDescription
                 sources[sourceIndex].isLoading = false
@@ -229,17 +239,28 @@ final class AltStoreSourcesViewModel: ObservableObject {
     private func loadStoredSources() {
         let defaults = UserDefaults.standard
         let stored = defaults.array(forKey: defaultsKey) as? [String] ?? []
+        let updatedMap = defaults.dictionary(forKey: lastUpdatedKey) as? [String: TimeInterval] ?? [:]
         let urls = stored.compactMap { URL(string: $0) }
-        self.sources = urls.map { SourceItem(url: $0, isLoading: false) }
+        self.sources = urls.map { url in
+            let timestamp = updatedMap[url.absoluteString].map { Date(timeIntervalSince1970: $0) }
+            return SourceItem(url: url, isLoading: false, lastUpdated: timestamp)
+        }
         for index in sources.indices {
             let url = sources[index].url
-            if let data = cachedData(for: url),
-               let cachedSource = try? AltStoreSourceLoader.decode(from: data, baseURL: url) {
-                sources[index].source = cachedSource
+            guard let data = cachedData(for: url) else {
+                continue
+            }
+            do {
+                sources[index].source = try AltStoreSourceLoader.decode(from: data, baseURL: url)
+            } catch {
+                // A corrupted cache file would otherwise keep this source stuck
+                // in a broken state forever; drop it and fall back to the
+                // "not synced" guidance card.
+                removeCache(for: url)
             }
         }
     }
-    
+
     private func persistSources() {
         let urls = sources.map { $0.url.absoluteString }
         UserDefaults.standard.set(urls, forKey: defaultsKey)
@@ -266,30 +287,54 @@ final class AltStoreSourcesViewModel: ObservableObject {
 private extension AltStoreSourcesViewModel {
     func cachedData(for url: URL) -> Data? {
         guard let fileURL = cacheFileURL(for: url) else { return nil }
-        return try? Data(contentsOf: fileURL)
+        if let data = try? Data(contentsOf: fileURL) {
+            return data
+        }
+        // Migrate caches written by older builds under Library/Caches, which iOS
+        // may purge at any time.
+        if let legacyCaches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            let legacyURL = legacyCaches.appendingPathComponent(cacheDirectoryName, isDirectory: true)
+                .appendingPathComponent(cacheFileName(for: url))
+            if let legacyData = try? Data(contentsOf: legacyURL) {
+                try? legacyData.write(to: fileURL, options: .atomic)
+                try? FileManager.default.removeItem(at: legacyURL)
+                return legacyData
+            }
+        }
+        return nil
     }
-    
-    func storeCache(_ data: Data, for url: URL) {
+
+    func storeCache(_ data: Data, for url: URL, updatedAt: Date) {
         guard let fileURL = cacheFileURL(for: url) else { return }
         do {
             try data.write(to: fileURL, options: .atomic)
         } catch {
             // Ignore cache write errors
+            return
         }
+        var updatedMap = (UserDefaults.standard.dictionary(forKey: lastUpdatedKey) as? [String: TimeInterval]) ?? [:]
+        updatedMap[url.absoluteString] = updatedAt.timeIntervalSince1970
+        UserDefaults.standard.set(updatedMap, forKey: lastUpdatedKey)
     }
-    
+
     func cacheFileURL(for url: URL) -> URL? {
         guard let directory = ensureCacheDirectory() else { return nil }
         let fileName = cacheFileName(for: url)
         return directory.appendingPathComponent(fileName)
     }
-    
+
+    /// Uses Documents instead of Library/Caches so that the cache survives
+    /// storage pressure cleanups, and excludes it from iCloud backup.
     func ensureCacheDirectory() -> URL? {
-        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
-        let directory = caches.appendingPathComponent(cacheDirectoryName, isDirectory: true)
-        if !FileManager.default.fileExists(atPath: directory.path) {
+        let directory = LCPath.docPath.appendingPathComponent(cacheDirectoryName, isDirectory: true)
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: directory.path) {
             do {
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+                var mutableDirectory = directory
+                var resourceValues = URLResourceValues()
+                resourceValues.isExcludedFromBackup = true
+                try? mutableDirectory.setResourceValues(resourceValues)
             } catch {
                 return nil
             }
@@ -305,18 +350,27 @@ private extension AltStoreSourcesViewModel {
     }
     
     func removeCache(for url: URL) {
-        guard let fileURL = cacheFileURL(for: url) else { return }
-        do {
-            try FileManager.default.removeItem(at: fileURL)
-        } catch {
-            // Ignore cache removal errors
+        if let fileURL = cacheFileURL(for: url) {
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+            } catch {
+                // Ignore cache removal errors
+            }
+        }
+        var updatedMap = (UserDefaults.standard.dictionary(forKey: lastUpdatedKey) as? [String: TimeInterval]) ?? [:]
+        if updatedMap.removeValue(forKey: url.absoluteString) != nil {
+            UserDefaults.standard.set(updatedMap, forKey: lastUpdatedKey)
         }
     }
 }
 
 enum AltStoreSourceLoader {
-    static func load(from url: URL) async throws -> (AltStoreSource, Data) {
-        let (data, response) = try await URLSession.shared.data(from: url)
+    static func load(from url: URL, ignoreCache: Bool = false) async throws -> (AltStoreSource, Data) {
+        var request = URLRequest(url: url)
+        if ignoreCache {
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
         if let httpResponse = response as? HTTPURLResponse,
            !(200...299).contains(httpResponse.statusCode) {
             throw NSError(domain: "AltStoreSource", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "HTTP \(httpResponse.statusCode)"])
@@ -851,6 +905,13 @@ private struct ManageSourcesSheet: View {
 }
 
 private struct AltStoreSourceSectionView: View {
+    private static let syncDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
     let item: AltStoreSourcesViewModel.SourceItem
     let filteredApps: [AltStoreSourceApp]
     let isFiltering: Bool
@@ -900,6 +961,12 @@ private struct AltStoreSourceSectionView: View {
                     .foregroundStyle(.secondary)
             }
             
+            if let lastUpdated = item.lastUpdated {
+                Text("lc.sources.lastSync %@".localizeWithFormat(Self.syncDateFormatter.string(from: lastUpdated)))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if let error = item.error {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("lc.sources.section.error".loc)
@@ -916,6 +983,35 @@ private struct AltStoreSourceSectionView: View {
                     RoundedRectangle(cornerRadius: 18)
                         .fill(Color(uiColor: UIColor.secondarySystemBackground))
                 )
+            } else if item.source == nil {
+                if item.isLoading {
+                    ProgressView("lc.sources.loading".loc)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    HStack(spacing: 12) {
+                        Image(systemName: "arrow.triangle.2.circlepath.circle")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("lc.sources.noCache.title".loc)
+                                .font(.subheadline).bold()
+                            Text("lc.sources.noCache.desc".loc)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(action: onRefresh) {
+                            Label("lc.sources.refresh".loc, systemImage: "arrow.clockwise")
+                                .font(.footnote.bold())
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 18)
+                            .fill(Color(uiColor: UIColor.secondarySystemBackground))
+                    )
+                }
             } else if let source = item.source, isExpanded || isFiltering {
                 VStack(spacing: 12) {
                     ForEach(filteredApps[0..<min(50, filteredApps.count)]) { app in
