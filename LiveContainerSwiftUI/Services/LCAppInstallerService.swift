@@ -220,6 +220,7 @@ final class LCAppInstallerService {
             finalNewApp.fixFilePickerNew = appToReplace.appInfo.fixFilePickerNew
             finalNewApp.fixLocalNotification = appToReplace.appInfo.fixLocalNotification
             finalNewApp.fixBackgroundTaskIdentifiers = appToReplace.appInfo.fixBackgroundTaskIdentifiers
+            finalNewApp.enableBackgroundKeepAlive = appToReplace.appInfo.enableBackgroundKeepAlive
             finalNewApp.lastLaunched = appToReplace.appInfo.lastLaunched
             finalNewApp.jitLaunchScriptJs = appToReplace.appInfo.jitLaunchScriptJs
             finalNewApp.multitaskSpecified = appToReplace.appInfo.multitaskSpecified

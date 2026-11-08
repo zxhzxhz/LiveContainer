@@ -15,6 +15,7 @@ void NSFMGuestHooksInit(void);
 void NSFMGuestExtensionHooksInit(NSString *parentContainerPath);
 void NSURLSCGuestHooksInit(void);
 void initDead10ccFix(void);
+void initBackgroundKeepAlive(void);
 void IDFVHookInit(NSUUID* uuid);
 void NSExtensionGuestHooksInit(NSURL *appURL, NSURL *containerURL);
 int LCRunGuestExtension(NSDictionary *request, NSExtensionContext *context);

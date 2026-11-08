@@ -317,6 +317,10 @@ struct LCAppSettingsView: View {
                         Text("lc.appSettings.fixBackgroundTaskIdentifiers".loc)
                     }
                 }
+                Toggle(isOn: $model.uiEnableBackgroundKeepAlive) {
+                    Text("lc.appSettings.backgroundKeepAlive".loc)
+                }
+                .disabled(!LCUtils.appGroupUserDefault.bool(forKey: "LCBackgroundKeepAliveEnabled"))
                 Toggle(isOn: $model.uiUseLCBundleId) {
                     Text("lc.appSettings.useLCBundleId".loc)
                 }
