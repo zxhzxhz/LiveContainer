@@ -30,7 +30,7 @@ enum LCDiskSizeCalculator {
     /// Recursively sums the allocated size of a directory on a background
     /// thread. Symbolic links are never followed: guest containers contain a
     /// link to the host TMPDIR which must not be counted as app data.
-    nonisolated static func directorySize(at rootURL: URL) async throws -> Int64 {
+    static func directorySize(at rootURL: URL) async throws -> Int64 {
         try await Task.detached(priority: .utility) {
             let fm = FileManager.default
             var isDir: ObjCBool = false
@@ -92,7 +92,7 @@ enum LCDiskSizeCalculator {
         }.value
     }
 
-    private nonisolated static func measureBundleSize(bundlePath: String?) async -> Int64 {
+    private static func measureBundleSize(bundlePath: String?) async -> Int64 {
         guard let bundlePath else {
             return 0
         }
@@ -100,7 +100,7 @@ enum LCDiskSizeCalculator {
     }
 
     /// Measures the app bundle and every container of an app.
-    nonisolated static func calculateAppUsage(
+    static func calculateAppUsage(
         bundlePath: String?,
         containers: [LCDiskSizeContainerInput]
     ) async throws -> LCAppDiskUsageResult {
