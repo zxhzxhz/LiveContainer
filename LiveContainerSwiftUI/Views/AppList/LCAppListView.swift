@@ -101,6 +101,8 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     @State private var quickActionNonce = 0
 
     @ObservedObject var searchContext: SearchContext = SearchContext()
+    @State private var isSearchActive = false
+    @FocusState private var isSearchFieldFocused: Bool
     var sortedApps: [LCAppModel] {
         return sharedAppSortManager.sortedApps
     }
@@ -200,6 +202,11 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                         EmptyView()
                 })
                 .hidden()
+                
+                if isSearchActive {
+                    searchBarView
+                        .id("LCAppListSearchBar")
+                }
                 
                 LazyVStack {
                     ForEach(displayedFolders) { folder in
@@ -309,6 +316,10 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 DragGesture(minimumDistance: 4)
                     .onChanged { _ in
                         gameController.notifyTouchInteraction()
+                        if isSearchFieldFocused {
+                            isSearchFieldFocused = false
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
                     }
             )
             .onReceive(gameController.commandPublisher) { command in
@@ -373,6 +384,25 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                     }
                     
 
+                }
+                
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isSearchActive.toggle()
+                            if isSearchActive {
+                                isSearchFieldFocused = true
+                                scrollProxy.scrollTo("LCAppListSearchBar", anchor: .top)
+                            } else {
+                                isSearchFieldFocused = false
+                                searchContext.query = ""
+                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                            }
+                        }
+                    } label: {
+                        Label("lc.common.search".loc, systemImage: isSearchActive ? "magnifyingglass.circle.fill" : "magnifyingglass")
+                    }
+                    .keyboardShortcut("f", modifiers: .command)
                 }
                 
                 ToolbarItem(placement: .topBarTrailing) {
@@ -595,8 +625,50 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 Task { await installFromUrl(urlStr: installUrl.absoluteString) }
             }
         }
-        .searchable(text: $searchContext.query)
 
+    }
+
+    private var searchBarView: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                    .font(.system(size: 14, weight: .medium))
+                TextField("lc.common.search".loc, text: $searchContext.query)
+                    .focused($isSearchFieldFocused)
+                    .textFieldStyle(.plain)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                if !searchContext.query.isEmpty {
+                    Button {
+                        searchContext.query = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 14))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color(UIColor.secondarySystemBackground))
+            .cornerRadius(10)
+
+            Button("lc.common.cancel".loc) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isSearchActive = false
+                    searchContext.query = ""
+                    isSearchFieldFocused = false
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+            }
+            .foregroundColor(.accentColor)
+        }
+        .padding(.horizontal)
+        .padding(.top, 4)
+        .padding(.bottom, 4)
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
     
     var JITEnablingModal : some View {
@@ -1411,12 +1483,20 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
 
         switch command {
         case .moveUp:
+            if isSearchFieldFocused {
+                isSearchFieldFocused = false
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
             let next = max(0, clampedIndex - 1)
             gameController.focusedIndex = next
             withAnimation(.easeInOut(duration: 0.18)) {
                 scrollProxy.scrollTo(items[next], anchor: .center)
             }
         case .moveDown:
+            if isSearchFieldFocused {
+                isSearchFieldFocused = false
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
             let next = min(items.count - 1, clampedIndex + 1)
             gameController.focusedIndex = next
             withAnimation(.easeInOut(duration: 0.18)) {
@@ -1430,7 +1510,14 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 Task { await launchAppFromController(app) }
             }
         case .cancel:
-            if !searchContext.query.isEmpty {
+            if isSearchActive {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isSearchActive = false
+                    searchContext.query = ""
+                    isSearchFieldFocused = false
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+            } else if !searchContext.query.isEmpty {
                 searchContext.query = ""
             }
         case .contextMenu:
@@ -1441,6 +1528,18 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         case .openSettings:
             if case .app(let app) = items[clampedIndex] {
                 openNavigationView(view: AnyView(LCAppSettingsView(model: app)))
+            }
+        case .toggleSearch:
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isSearchActive.toggle()
+                if isSearchActive {
+                    isSearchFieldFocused = true
+                    scrollProxy.scrollTo("LCAppListSearchBar", anchor: .top)
+                } else {
+                    isSearchFieldFocused = false
+                    searchContext.query = ""
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
             }
         case .previousTab, .nextTab:
             break // Handled by LCTabView
