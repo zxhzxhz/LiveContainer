@@ -19,6 +19,7 @@ enum LCControllerCommand: Equatable {
     case openSettings  // Y
     case previousTab   // LB
     case nextTab       // RB
+    case toggleSearch  // Options / View
 }
 
 extension Notification.Name {
@@ -156,6 +157,10 @@ final class LCGameControllerManager: ObservableObject {
             gamepad.buttonMenu.pressedChangedHandler = { [weak self] _, _, pressed in
                 guard pressed else { return }
                 Task { @MainActor in self?.emitCommand(.contextMenu) }
+            }
+            gamepad.buttonOptions?.pressedChangedHandler = { [weak self] _, _, pressed in
+                guard pressed else { return }
+                Task { @MainActor in self?.emitCommand(.toggleSearch) }
             }
             gamepad.leftShoulder.pressedChangedHandler = { [weak self] _, _, pressed in
                 guard pressed else { return }

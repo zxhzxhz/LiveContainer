@@ -260,7 +260,7 @@ struct LCFolderView: View, LCAppBannerDelegate {
         case .openSettings:
             navigateTo = AnyView(LCAppSettingsView(model: items[index]))
             isNavigationActive = true
-        case .cancel, .previousTab, .nextTab:
+        case .cancel, .previousTab, .nextTab, .toggleSearch:
             break
         }
     }
