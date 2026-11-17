@@ -7,3 +7,25 @@ packages/
 xcuserdata
 Resources/Frameworks/OpenSSL.framework
 apps_nightly.json
+
+# ==== 本地编译环境（仅本机，不进版本库）====
+# 编译产物
+/dist/
+# 一键编译脚本与说明文档（依赖本机 WSL2 + Docker-OSX 环境）
+/build-local.sh
+/BUILD-LOCAL.md
+# 无 GUI 调试辅助工具（QMP 截图 / OCR / 差分 / 死锁判定 / SideStore 打包）
+/tools/
+# 会话临时文件、备份与崩溃日志
+/tmp/
+/backups/
+/crashlog/
+/cache/
+/logs/
+/build-seeingcalendar.sh
+*.bak*
+__pycache__/
+
+# ==== 个人笔记（本地文件，不进版本库）====
+/LiveContainer 个人 Fork 增强改造：代码修改与实施技术规范（AI Agent 落地指南）.md
+/过程记录及教训.md

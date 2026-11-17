@@ -12,7 +12,15 @@ import Security
 import Combine
 
 struct LCPath {
-    public static let docPath = {
+    public static let docPath: URL = {
+        // When running inside a Single-App guest process, HOME points to the
+        // guest app's data container; LC_HOME_PATH always preserves LiveContainer's real home.
+        if let lcHome = getenv("LC_HOME_PATH") {
+            let homeStr = String(cString: lcHome)
+            if !homeStr.isEmpty {
+                return URL(fileURLWithPath: homeStr, isDirectory: true).appendingPathComponent("Documents", isDirectory: true)
+            }
+        }
         let fm = FileManager()
         return fm.urls(for: .documentDirectory, in: .userDomainMask).last!
     }()
@@ -79,8 +87,9 @@ class SharedModel: ObservableObject {
     }()
     
     static let isLiquidGlassEnabled = {
+        let hostBundle = UserDefaults.lcMainBundle() ?? Bundle.main
         if #available(iOS 19.0, *), (dyld_get_program_sdk_version() >= 0x1a0000 || UserDefaults.standard.bool(forKey: "com.apple.SwiftUI.IgnoreSolariumLinkedOnCheck")) {
-            if let compatibilityEnabled = Bundle.main.infoDictionary?["UIDesignRequiresCompatibility"] as? Bool, compatibilityEnabled {
+            if let compatibilityEnabled = hostBundle.infoDictionary?["UIDesignRequiresCompatibility"] as? Bool, compatibilityEnabled {
                 return false
             }
             
@@ -109,6 +118,108 @@ class SharedModel: ObservableObject {
 class DataManager {
     static let shared = DataManager()
     let model = SharedModel()
+    private var hasLoadedWorkspaceData = false
+
+    func loadWorkspaceData(force: Bool = false) {
+        guard force || !hasLoadedWorkspaceData else {
+            return
+        }
+        hasLoadedWorkspaceData = true
+        model.updateMultiLCStatus()
+
+        let fm = FileManager()
+        var tempAppDataFolderNames: [String] = []
+        var tempTweakFolderNames: [String] = []
+
+        var tempApps: [LCAppModel] = []
+        var tempArm32EmuApps: [LCAppModel] = []
+        var tempHiddenApps: [LCAppModel] = []
+        var tempURLSchemes: Set<String>? = model.multiLCStatus != 2 ? Set() : nil
+
+        do {
+            try fm.createDirectory(at: LCPath.bundlePath, withIntermediateDirectories: true)
+            let appDirs = try fm.contentsOfDirectory(atPath: LCPath.bundlePath.path)
+            for appDir in appDirs {
+                if !appDir.hasSuffix(".app") {
+                    continue
+                }
+                guard let newApp = LCAppInfo(bundlePath: "\(LCPath.bundlePath.path)/\(appDir)") else {
+                    continue
+                }
+                newApp.relativeBundlePath = appDir
+                newApp.isShared = false
+                let appModel = LCAppModel(appInfo: newApp)
+                if newApp.isHidden {
+                    tempHiddenApps.append(appModel)
+                } else {
+                    tempApps.append(appModel)
+                    if let schemes = newApp.urlSchemes() as? [String] {
+                        tempURLSchemes?.formUnion(schemes)
+                    }
+                }
+                if newApp.is32bitEmulator {
+                    tempArm32EmuApps.append(appModel)
+                }
+            }
+            if LCPath.lcGroupDocPath != LCPath.docPath {
+                try fm.createDirectory(at: LCPath.lcGroupBundlePath, withIntermediateDirectories: true)
+                let appDirsShared = try fm.contentsOfDirectory(atPath: LCPath.lcGroupBundlePath.path)
+                for appDir in appDirsShared {
+                    if !appDir.hasSuffix(".app") {
+                        continue
+                    }
+                    guard let newApp = LCAppInfo(bundlePath: "\(LCPath.lcGroupBundlePath.path)/\(appDir)") else {
+                        continue
+                    }
+                    newApp.relativeBundlePath = appDir
+                    newApp.isShared = true
+                    let appModel = LCAppModel(appInfo: newApp)
+                    if newApp.isHidden {
+                        tempHiddenApps.append(appModel)
+                    } else {
+                        tempApps.append(appModel)
+                        if let schemes = newApp.urlSchemes() as? [String] {
+                            tempURLSchemes?.formUnion(schemes)
+                        }
+                    }
+                    if newApp.is32bitEmulator {
+                        tempArm32EmuApps.append(appModel)
+                    }
+                }
+            }
+            try fm.createDirectory(at: LCPath.dataPath, withIntermediateDirectories: true)
+            let dataDirs = try fm.contentsOfDirectory(atPath: LCPath.dataPath.path)
+            for dataDir in dataDirs {
+                let dataDirUrl = LCPath.dataPath.appendingPathComponent(dataDir)
+                if !dataDirUrl.hasDirectoryPath {
+                    continue
+                }
+                tempAppDataFolderNames.append(dataDir)
+            }
+
+            try fm.createDirectory(at: LCPath.tweakPath, withIntermediateDirectories: true)
+            let tweakDirs = try fm.contentsOfDirectory(atPath: LCPath.tweakPath.path)
+            for tweakDir in tweakDirs {
+                let tweakDirUrl = LCPath.tweakPath.appendingPathComponent(tweakDir)
+                if !tweakDirUrl.hasDirectoryPath {
+                    continue
+                }
+                let folderName = tweakDir.hasSuffix(".disabled") ? String(tweakDir.dropLast(".disabled".count)) : tweakDir
+                tempTweakFolderNames.append(folderName)
+            }
+        } catch {
+            NSLog("[LC] error:\(error)")
+        }
+
+        model.apps = tempApps
+        model.arm32EmuApps = tempArm32EmuApps
+        model.hiddenApps = tempHiddenApps
+        model.appDataFolderNames = tempAppDataFolderNames
+        model.tweakFolderNames = tempTweakFolderNames
+        if let tempURLSchemes {
+            UserDefaults.lcShared().set(Array(tempURLSchemes), forKey: "LCGuestURLSchemes")
+        }
+    }
 }
 
 class AlertHelper<T> : ObservableObject {
@@ -161,9 +272,11 @@ extension String: @retroactive LocalizedError {
         
     private static var enBundle : Bundle? = {
         let language = "en"
-        let path = Bundle.main.path(forResource:language, ofType: "lproj")
-        let bundle = Bundle(path: path!)
-        return bundle
+        let hostBundle = UserDefaults.lcMainBundle() ?? Bundle.main
+        guard let path = hostBundle.path(forResource: language, ofType: "lproj") else {
+            return nil
+        }
+        return Bundle(path: path)
     }()
     
     var loc: String {

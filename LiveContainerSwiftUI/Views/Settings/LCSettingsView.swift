@@ -72,6 +72,7 @@ struct LCSettingsView: View {
 
     @AppStorage("LCHTTPServerEnabled", store: LCUtils.appGroupUserDefault) var httpServerEnabled = false
     @AppStorage("LCHTTPServerLoopbackOnly", store: LCUtils.appGroupUserDefault) var httpServerLoopbackOnly = false
+    @AppStorage("LCHTTPServerBackgroundKeepAliveEnabled", store: LCUtils.appGroupUserDefault) var httpServerBackgroundKeepAliveEnabled = true
     @State private var httpServerPortText = ""
     @State private var httpToken = ""
     @ObservedObject private var httpServer = LCHTTPServer.shared
@@ -185,6 +186,9 @@ struct LCSettingsView: View {
                         Toggle(isOn: $httpServerLoopbackOnly) {
                             Text("lc.settings.httpAPI.loopbackOnly".loc)
                         }
+                        Toggle(isOn: $httpServerBackgroundKeepAliveEnabled) {
+                            Text("lc.settings.httpAPI.backgroundKeepAlive".loc)
+                        }
                         HStack {
                             Text("lc.settings.httpAPI.token".loc)
                             Spacer()
@@ -215,6 +219,16 @@ struct LCSettingsView: View {
                             } else {
                                 Label("lc.settings.httpAPI.stopped".loc, systemImage: "xmark.circle")
                                     .foregroundStyle(.secondary)
+                            }
+                        }
+                        if httpServerBackgroundKeepAliveEnabled {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("lc.settings.httpAPI.keepAliveStatus".loc)
+                                    .font(.subheadline)
+                                Text(httpServer.keepAliveStatus)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
                             }
                         }
                         if let error = httpServer.lastError, !error.isEmpty {
@@ -467,6 +481,9 @@ struct LCSettingsView: View {
                 if httpServerEnabled {
                     httpServer.restart()
                 }
+            }
+            .onChange(of: httpServerBackgroundKeepAliveEnabled) { _ in
+                httpServer.syncHostBackgroundKeepAlive()
             }
             .alert("lc.common.error".loc, isPresented: $errorShow){
             } message: {

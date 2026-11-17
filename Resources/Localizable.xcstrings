@@ -23575,13 +23575,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Keeps a guest app running in the background with a silent audio session. Turn it on for individual apps in their settings page. This uses more battery."
+            "value" : "Keeps a guest app running in the background using iOS 26+ continued background processing (falling back to silent audio on iOS < 26 or Multitask mode). Turn it on for individual apps in their settings page. This uses more battery."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "通过静音音频会话让访客应用在后台继续运行。请在应用详情页为单个应用开启，此功能会显著增加耗电。"
+            "value" : "在 iOS 26+ 上使用后台持续处理任务（iOS 26 以下或多任务模式回退为静音音频）让访客应用在后台继续运行。请在应用详情页为单个应用开启，此功能会增加耗电。"
           }
         }
       }
@@ -23620,19 +23620,53 @@
         }
       }
     },
+    "lc.settings.httpAPI.backgroundKeepAlive" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep Running in Background"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切入后台保持运行"
+          }
+        }
+      }
+    },
+    "lc.settings.httpAPI.keepAliveStatus" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background Keep-Alive Status"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "后台保活状态"
+          }
+        }
+      }
+    },
     "lc.settings.httpAPI.desc" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Allows installing IPA, uninstalling apps and browsing the sandbox over HTTP. Every request must carry the API token."
+            "value" : "Allows installing IPA, uninstalling apps and browsing the sandbox over HTTP. Every request must carry the API token. Also injected into single-app guests unless Hide LiveContainer is enabled."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "允许通过 HTTP 安装 IPA、卸载应用与浏览沙盒文件。所有请求都必须携带 API 令牌。"
+            "value" : "允许通过 HTTP 安装 IPA、卸载应用与浏览沙盒文件，所有请求必须携带 API 令牌。单应用模式启动未开启“隐藏 LiveContainer”的应用时也会保持端点运行。"
           }
         }
       }

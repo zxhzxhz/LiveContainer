@@ -26,10 +26,12 @@ void swizzle2(Class class, SEL originalAction, Class class2, SEL swizzledAction)
 
 NSURL* appContainerURL = 0;
 NSString* appContainerPath = 0;
+static NSString* lcSharedAppGroupID = nil;
 
 void NUDGuestHooksInit(void) {
     appContainerPath = [NSString stringWithUTF8String:getenv("HOME")];
     appContainerURL = [NSURL URLWithString:appContainerPath];
+    lcSharedAppGroupID = [LCSharedUtils appGroupID];
     
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wundeclared-selector"
@@ -118,7 +120,8 @@ bool isAppleIdentifier(NSString* identifier) {
 
 @implementation CFPrefsPlistSource2
 -(id)hook_initWithDomain:(CFStringRef)domain user:(CFStringRef)user byHost:(bool)host containerPath:(CFStringRef)containerPath containingPreferences:(id)arg5 {
-    if(isAppleIdentifier((__bridge NSString*)domain)) {
+    NSString *domainStr = (__bridge NSString *)domain;
+    if(isAppleIdentifier(domainStr) || (lcSharedAppGroupID && [domainStr isEqualToString:lcSharedAppGroupID])) {
         return [self hook_initWithDomain:domain user:user byHost:host containerPath:containerPath containingPreferences:arg5];
     }
     if(user == kCFPreferencesAnyUser) {

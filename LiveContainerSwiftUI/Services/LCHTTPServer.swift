@@ -9,6 +9,24 @@
 import Foundation
 import Network
 import Security
+import UIKit
+
+@objc(LCHTTPGuestBootstrap)
+@MainActor
+public final class LCHTTPGuestBootstrap: NSObject {
+    @objc public static func startIfEnabledInGuestMode() {
+        guard UserDefaults.lcGuestAppId() != nil,
+              !UserDefaults.isLiveProcess(),
+              !UserDefaults.isSideStore() else {
+            return
+        }
+        guard LCHTTPServer.shared.isEnabled else {
+            return
+        }
+        DataManager.shared.loadWorkspaceData()
+        LCHTTPServer.shared.startIfEnabled()
+    }
+}
 
 // MARK: - Model
 
@@ -29,6 +47,35 @@ struct LCHTTPResponse {
     var downloadFileName: String?
 }
 
+// MARK: - Session Manager
+
+final class LCHTTPConnectionManager: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sessions: [ObjectIdentifier: LCHTTPConnectionSession] = [:]
+
+    func add(_ session: LCHTTPConnectionSession) {
+        lock.lock()
+        sessions[ObjectIdentifier(session)] = session
+        lock.unlock()
+    }
+
+    func remove(_ session: LCHTTPConnectionSession) {
+        lock.lock()
+        sessions.removeValue(forKey: ObjectIdentifier(session))
+        lock.unlock()
+    }
+
+    func cancelAll() {
+        lock.lock()
+        let all = Array(sessions.values)
+        sessions.removeAll()
+        lock.unlock()
+        for session in all {
+            session.cancel()
+        }
+    }
+}
+
 // MARK: - Server
 
 @MainActor
@@ -37,11 +84,37 @@ final class LCHTTPServer: ObservableObject {
 
     @Published private(set) var isRunning = false
     @Published private(set) var lastError: String?
+    @Published private(set) var keepAliveStatus: String = LCGetBackgroundKeepAliveStatusDescription()
 
     private var listener: NWListener?
     private let serverQueue = DispatchQueue(label: "com.kdt.livecontainer.httpserver", qos: .utility)
+    private let connectionManager = LCHTTPConnectionManager()
+    private var foregroundObserver: NSObjectProtocol?
+    private var keepAliveStatusObserver: NSObjectProtocol?
 
-    private init() {}
+    private init() {
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.isEnabled && !self.isRunning {
+                    self.start()
+                }
+            }
+        }
+        keepAliveStatusObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name.LCBackgroundKeepAliveStatusDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.keepAliveStatus = LCGetBackgroundKeepAliveStatusDescription()
+            }
+        }
+    }
 
     // MARK: Configuration
 
@@ -54,6 +127,20 @@ final class LCHTTPServer: ObservableObject {
             } else {
                 stop()
             }
+        }
+    }
+
+    var backgroundKeepAliveEnabled: Bool {
+        get {
+            let defaults = LCUtils.appGroupUserDefault
+            if defaults.object(forKey: "LCHTTPServerBackgroundKeepAliveEnabled") == nil {
+                return true
+            }
+            return defaults.bool(forKey: "LCHTTPServerBackgroundKeepAliveEnabled")
+        }
+        set {
+            LCUtils.appGroupUserDefault.set(newValue, forKey: "LCHTTPServerBackgroundKeepAliveEnabled")
+            syncHostBackgroundKeepAlive()
         }
     }
 
@@ -89,6 +176,7 @@ final class LCHTTPServer: ObservableObject {
 
     func startIfEnabled() {
         guard isEnabled else {
+            syncHostBackgroundKeepAlive()
             return
         }
         start()
@@ -104,6 +192,7 @@ final class LCHTTPServer: ObservableObject {
         _ = apiToken
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
             lastError = "Invalid port \(port)"
+            syncHostBackgroundKeepAlive()
             return
         }
         do {
@@ -120,33 +209,48 @@ final class LCHTTPServer: ObservableObject {
                     case .ready:
                         self.isRunning = true
                         self.lastError = nil
+                        self.syncHostBackgroundKeepAlive()
                     case .failed(let error):
                         self.isRunning = false
                         self.lastError = error.localizedDescription
+                        self.syncHostBackgroundKeepAlive()
                     case .cancelled:
                         self.isRunning = false
+                        self.syncHostBackgroundKeepAlive()
                     default:
                         break
                     }
                 }
             }
             let connectionQueue = serverQueue
+            let manager = connectionManager
             nwListener.newConnectionHandler = { connection in
-                let session = LCHTTPConnectionSession(connection: connection, queue: connectionQueue)
+                let session = LCHTTPConnectionSession(
+                    connection: connection,
+                    queue: connectionQueue,
+                    onComplete: { s in
+                        manager.remove(s)
+                    }
+                )
+                manager.add(session)
                 session.start()
             }
             nwListener.start(queue: serverQueue)
             listener = nwListener
+            syncHostBackgroundKeepAlive()
         } catch {
             lastError = error.localizedDescription
             isRunning = false
+            syncHostBackgroundKeepAlive()
         }
     }
 
     func stop() {
         listener?.cancel()
         listener = nil
+        connectionManager.cancelAll()
         isRunning = false
+        syncHostBackgroundKeepAlive()
     }
 
     /// Applies port / binding changes by restarting after the old listener has
@@ -157,6 +261,17 @@ final class LCHTTPServer: ObservableObject {
             self?.start()
         }
     }
+
+    func syncHostBackgroundKeepAlive() {
+        // Guest processes use initBackgroundKeepAlive() with GPU rendering guards;
+        // only the LiveContainer main app uses host-level HTTP keep-alive.
+        guard UserDefaults.lcGuestAppId() == nil else {
+            return
+        }
+        let shouldKeepAlive = isEnabled && backgroundKeepAliveEnabled && (isRunning || listener != nil)
+        LCSetHostBackgroundKeepAliveEnabled(shouldKeepAlive, Int(port))
+        keepAliveStatus = LCGetBackgroundKeepAliveStatusDescription()
+    }
 }
 
 // MARK: - Connection
@@ -164,6 +279,7 @@ final class LCHTTPServer: ObservableObject {
 final class LCHTTPConnectionSession {
     private let connection: NWConnection
     private let queue: DispatchQueue
+    private let onComplete: ((LCHTTPConnectionSession) -> Void)?
 
     private var headerBuffer = Data()
     private var headerParsed = false
@@ -178,32 +294,70 @@ final class LCHTTPConnectionSession {
     private var isStreamingBody = false
     private var responded = false
     private var requestFinished = false
+    private var isStarted = false
+    private var timeoutWorkItem: DispatchWorkItem?
 
+    /// Network.framework only hands us the connection: the listener does not
+    /// keep the session, and every callback below captures `self` weakly. The
+    /// session therefore has to own itself from `start()` until the exchange
+    /// finishes, otherwise it is deallocated before the first byte arrives and
+    /// the connection hangs open forever without a response.
+    private var selfRetain: LCHTTPConnectionSession?
+
+    private static let idleTimeoutSeconds: Double = 60
     private static let maxHeaderSize = 16 * 1024
     private static let maxInMemoryBody = 2 * 1024 * 1024
     private static let headerTerminator = Data([13, 10, 13, 10])
 
-    init(connection: NWConnection, queue: DispatchQueue) {
+    init(connection: NWConnection, queue: DispatchQueue, onComplete: ((LCHTTPConnectionSession) -> Void)? = nil) {
         self.connection = connection
         self.queue = queue
+        self.onComplete = onComplete
     }
 
     deinit {
+        cancelTimeout()
         cleanupBodyFile()
     }
 
     func start() {
+        selfRetain = self
+        resetTimeout()
         connection.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
             switch state {
             case .ready:
-                self?.receiveNext()
+                guard !self.isStarted else { return }
+                self.isStarted = true
+                self.receiveNext()
             case .failed, .cancelled:
-                self?.cleanup()
+                self.cleanup()
             default:
                 break
             }
         }
         connection.start(queue: queue)
+    }
+
+    func cancel() {
+        queue.async { [weak self] in
+            self?.cleanup()
+        }
+    }
+
+    private func resetTimeout() {
+        timeoutWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, !self.responded, !self.requestFinished else { return }
+            self.finishWithError(status: 408, message: "Request Timeout")
+        }
+        timeoutWorkItem = item
+        queue.asyncAfter(deadline: .now() + Self.idleTimeoutSeconds, execute: item)
+    }
+
+    private func cancelTimeout() {
+        timeoutWorkItem?.cancel()
+        timeoutWorkItem = nil
     }
 
     private func receiveNext() {
@@ -214,6 +368,7 @@ final class LCHTTPConnectionSession {
                 return
             }
             if let data, !data.isEmpty {
+                self.resetTimeout()
                 self.consume(data)
             }
             if isComplete {
@@ -249,7 +404,7 @@ final class LCHTTPConnectionSession {
 
             if expectedBodyLength > 0 {
                 if isStreamingBody {
-                    prepareStreamingBodyFile()
+                    guard prepareStreamingBodyFile() else { return }
                 }
                 if !bodyPrefix.isEmpty {
                     appendBody(bodyPrefix)
@@ -345,12 +500,17 @@ final class LCHTTPConnectionSession {
         return path == "/api/v1/apps/install" || path == "/api/v1/fs/upload"
     }
 
-    private func prepareStreamingBodyFile() {
+    private func prepareStreamingBodyFile() -> Bool {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("LCUpload_\(UUID().uuidString).tmp")
         FileManager.default.createFile(atPath: url.path, contents: nil)
         bodyFileURL = url
-        bodyFileHandle = try? FileHandle(forWritingTo: url)
+        guard let handle = try? FileHandle(forWritingTo: url) else {
+            finishWithError(status: 500, message: "Cannot create temporary upload file")
+            return false
+        }
+        bodyFileHandle = handle
+        return true
     }
 
     private func appendBody(_ data: Data) {
@@ -370,7 +530,8 @@ final class LCHTTPConnectionSession {
     private func finishRequest() {
         guard !responded, !requestFinished else { return }
         requestFinished = true
-        bodyFileHandle?.closeFile()
+        cancelTimeout()
+        try? bodyFileHandle?.close()
         bodyFileHandle = nil
 
         let request = LCHTTPRequest(
@@ -396,6 +557,7 @@ final class LCHTTPConnectionSession {
     private func send(_ response: LCHTTPResponse) {
         guard !responded else { return }
         responded = true
+        cancelTimeout()
 
         if let fileURL = response.downloadURL {
             sendFile(response, fileURL: fileURL)
@@ -406,6 +568,9 @@ final class LCHTTPConnectionSession {
         headers["Content-Length"] = "\(response.body.count)"
         headers["Connection"] = "close"
         headers["Server"] = "LiveContainer"
+        headers["Access-Control-Allow-Origin"] = "*"
+        headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+        headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-LC-Token"
         if headers["Content-Type"] == nil {
             headers["Content-Type"] = "application/json; charset=utf-8"
         }
@@ -417,7 +582,7 @@ final class LCHTTPConnectionSession {
         payload.append(Data("\r\n".utf8))
         payload.append(response.body)
 
-        connection.send(content: payload, completion: .contentProcessed { [weak self] _ in
+        connection.send(content: payload, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { [weak self] _ in
             self?.closeConnection()
         })
     }
@@ -438,6 +603,9 @@ final class LCHTTPConnectionSession {
         headers["Content-Type"] = "application/octet-stream"
         headers["Connection"] = "close"
         headers["Server"] = "LiveContainer"
+        headers["Access-Control-Allow-Origin"] = "*"
+        headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+        headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-LC-Token"
         if let fileName = response.downloadFileName {
             headers["Content-Disposition"] = "attachment; filename=\"\(fileName)\""
         }
@@ -448,8 +616,24 @@ final class LCHTTPConnectionSession {
         }
         payload.append(Data("\r\n".utf8))
 
-        connection.send(content: payload, completion: .contentProcessed { [weak self] error in
-            guard let self else { return }
+        if fileSize == 0 {
+            try? handle.close()
+            // NOTE: keep the context at .defaultMessage. Mixing a .finalMessage
+            // send into a connection that already sent .defaultMessage content
+            // makes Network.framework stall the connection forever (the send is
+            // neither delivered nor completed); a single .defaultMessage send
+            // with isComplete: true delivers and closes correctly.
+            connection.send(content: payload, contentContext: .defaultMessage, isComplete: true, completion: .contentProcessed { [weak self] _ in
+                self?.closeConnection()
+            })
+            return
+        }
+
+        connection.send(content: payload, contentContext: .defaultMessage, isComplete: false, completion: .contentProcessed { [weak self] error in
+            guard let self else {
+                try? handle.close()
+                return
+            }
             if error != nil {
                 try? handle.close()
                 self.cleanup()
@@ -479,15 +663,27 @@ final class LCHTTPConnectionSession {
             cleanup()
             return
         }
-        connection.send(content: chunk, completion: .contentProcessed { [weak self] error in
-            guard let self else { return }
-            if error != nil {
-                try? handle.close()
-                self.cleanup()
-                return
+        let isLastChunk = (sent + Int64(chunk.count)) >= total
+        // Always .defaultMessage: see the note in sendFile(). Switching the last
+        // chunk to .finalMessage after earlier .defaultMessage sends hangs the
+        // connection (no bytes delivered, completion never fires).
+        connection.send(
+            content: chunk,
+            contentContext: .defaultMessage,
+            isComplete: isLastChunk,
+            completion: .contentProcessed { [weak self] error in
+                guard let self else {
+                    try? handle.close()
+                    return
+                }
+                if error != nil {
+                    try? handle.close()
+                    self.cleanup()
+                    return
+                }
+                self.streamFile(handle: handle, sent: sent + Int64(chunk.count), total: total)
             }
-            self.streamFile(handle: handle, sent: sent + Int64(chunk.count), total: total)
-        })
+        )
     }
 
     private static func statusLine(_ status: Int) -> String {
@@ -498,6 +694,7 @@ final class LCHTTPConnectionSession {
         case 401: reason = "Unauthorized"
         case 403: reason = "Forbidden"
         case 404: reason = "Not Found"
+        case 408: reason = "Request Timeout"
         case 409: reason = "Conflict"
         case 411: reason = "Length Required"
         case 413: reason = "Payload Too Large"
@@ -515,16 +712,28 @@ final class LCHTTPConnectionSession {
 
     private func closeConnection() {
         responded = true
+        cancelTimeout()
         cleanupBodyFile()
         connection.cancel()
+        // The exchange is over: drop the self-reference and notify manager so the session can go.
+        selfRetain = nil
+        onComplete?(self)
     }
 
     private func cleanup() {
+        responded = true
+        cancelTimeout()
         cleanupBodyFile()
+        // Also reached from the connection's .failed / .cancelled state and from
+        // mid-stream file errors; make sure the socket and the self-reference do
+        // not outlive the session.
+        connection.cancel()
+        selfRetain = nil
+        onComplete?(self)
     }
 
     private func cleanupBodyFile() {
-        bodyFileHandle?.closeFile()
+        try? bodyFileHandle?.close()
         bodyFileHandle = nil
         if let bodyFileURL {
             try? FileManager.default.removeItem(at: bodyFileURL)
@@ -582,6 +791,13 @@ final class LCHTTPRouter {
         guard request.path.hasPrefix("/api/v1/") else {
             return Self.errorResponse(status: 404, message: "Unknown endpoint: " + request.path)
         }
+        if request.method == "OPTIONS" {
+            var response = LCHTTPResponse(status: 204)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-LC-Token"
+            return response
+        }
         guard isAuthorized(request) else {
             return Self.errorResponse(status: 401, message: "Missing or invalid API token")
         }
@@ -622,7 +838,12 @@ final class LCHTTPRouter {
             return false
         }
         if let header = headers["authorization"] {
-            let bearer = header.hasPrefix("Bearer ") ? String(header.dropFirst("Bearer ".count)) : header
+            let bearer: String
+            if header.prefix(7).caseInsensitiveCompare("Bearer ") == .orderedSame {
+                bearer = String(header.dropFirst(7))
+            } else {
+                bearer = header
+            }
             if constantTimeEquals(bearer, token) {
                 return true
             }
@@ -655,7 +876,8 @@ final class LCHTTPRouter {
 
     private func statusResponse() -> LCHTTPResponse {
         let sharedModel = DataManager.shared.model
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let hostBundle = UserDefaults.lcMainBundle() ?? Bundle.main
+        let version = hostBundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
         let payload = LCStatusPayload(
             running: LCHTTPServer.shared.isRunning,
             port: Int(LCHTTPServer.shared.port),

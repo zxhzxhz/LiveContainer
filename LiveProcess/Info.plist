@@ -32,6 +32,8 @@
 			<string>MicroGamepad</string>
 		</dict>
 	</array>
+	<key>GCSupportsGameMode</key>
+	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

@@ -228,7 +228,8 @@
 
 - (UIImage *)generateLiveContainerWrappedIconWithStyle:(GeneratedIconStyle)style {
     UIImage* icon = [UIImage generateIconForBundleURL:[NSURL fileURLWithPath:_bundlePath] style:style hasBorder:NO];
-    if (![NSUserDefaults.standardUserDefaults boolForKey:@"LCFrameShortcutIcons"]) {
+    NSUserDefaults *hostDefaults = NSUserDefaults.lcUserDefaults ?: NSUserDefaults.standardUserDefaults;
+    if (![hostDefaults boolForKey:@"LCFrameShortcutIcons"]) {
         return icon;
     }
 
@@ -294,13 +295,14 @@
 }
 
 - (void)patchExecAndSignIfNeedWithCompletionHandler:(void(^)(bool success, NSString* errorInfo))completetionHandler progressHandler:(void(^)(NSProgress* progress))progressHandler forceSign:(BOOL)forceSign {
-    [NSUserDefaults.standardUserDefaults setObject:@(YES) forKey:@"SigningInProgress"];
+    NSUserDefaults *hostDefaults = NSUserDefaults.lcUserDefaults ?: NSUserDefaults.standardUserDefaults;
+    [hostDefaults setObject:@(YES) forKey:@"SigningInProgress"];
     NSString *appPath = self.bundlePath;
 
     NSMutableDictionary *info = _info;
     NSMutableDictionary *infoPlist = _infoPlist;
     if (!info) {
-        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"SigningInProgress"];
+        [hostDefaults removeObjectForKey:@"SigningInProgress"];
         completetionHandler(NO, @"Info.plist not found");
         return;
     }
@@ -342,7 +344,7 @@
             error = @"The app you tried to install is encrypted. Please provide decrypted app.";
         }
         if (error) {
-            [NSUserDefaults.standardUserDefaults removeObjectForKey:@"SigningInProgress"];
+            [hostDefaults removeObjectForKey:@"SigningInProgress"];
             completetionHandler(NO, error);
             return;
         }
@@ -356,7 +358,7 @@
         }
         error = [self patchGuestExtensions];
         if (error) {
-            [NSUserDefaults.standardUserDefaults removeObjectForKey:@"SigningInProgress"];
+            [hostDefaults removeObjectForKey:@"SigningInProgress"];
             completetionHandler(NO, error);
             return;
         }
@@ -367,7 +369,7 @@
     }
 
     if (!LCSharedUtils.certificatePassword || self.is32bit || self.dontSign) {
-        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"SigningInProgress"];
+        [hostDefaults removeObjectForKey:@"SigningInProgress"];
         completetionHandler(YES, nil);
         return;
     }
@@ -378,14 +380,14 @@
         bool signatureValid = checkCodeSignature(executablePath.UTF8String);
         
         if(signatureValid) {
-            [NSUserDefaults.standardUserDefaults removeObjectForKey:@"SigningInProgress"];
+            [hostDefaults removeObjectForKey:@"SigningInProgress"];
             completetionHandler(YES, nil);
             return;
         }
     }
     
     if (!LCUtils.certificateData) {
-        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"SigningInProgress"];
+        [hostDefaults removeObjectForKey:@"SigningInProgress"];
         completetionHandler(NO, @"lc.signer.noCertificateFoundErr");
         return;
     }
@@ -394,7 +396,7 @@
         NSURL *appPathURL = [NSURL fileURLWithPath:appPath];
             void (^signCompletionHandler)(BOOL success, NSError *error)  = ^(BOOL success, NSError *_Nullable error) {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"SigningInProgress"];
+                    [hostDefaults removeObjectForKey:@"SigningInProgress"];
                     if(!success) {
                         completetionHandler(NO, error.localizedDescription);
                     } else {
@@ -615,7 +617,7 @@
     NSString *infoPath = [NSString stringWithFormat:@"%@/Info.plist", self.bundlePath];
     if(doUseLCBundleId) {
         _info[@"LCOrignalBundleIdentifier"] = _infoPlist[@"CFBundleIdentifier"];
-        _infoPlist[@"CFBundleIdentifier"] = NSBundle.mainBundle.bundleIdentifier;
+        _infoPlist[@"CFBundleIdentifier"] = (NSUserDefaults.lcMainBundle ?: NSBundle.mainBundle).bundleIdentifier;
     } else if (_info[@"LCOrignalBundleIdentifier"]) {
         _infoPlist[@"CFBundleIdentifier"] = _info[@"LCOrignalBundleIdentifier"];
         [_info removeObjectForKey:@"LCOrignalBundleIdentifier"];

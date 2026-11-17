@@ -21,6 +21,10 @@
 @end
 
 @implementation LCUtils
++ (NSBundle *)hostMainBundle {
+    return NSUserDefaults.lcMainBundle ?: NSBundle.mainBundle;
+}
+
 #pragma mark Certificate & password
 
 + (NSData *)certificateData {
@@ -96,13 +100,15 @@
     static BOOL loaded = NO;
     if (loaded) return;
 
-    void* handle = dlopen("@executable_path/Frameworks/ZSign.dylib", RTLD_GLOBAL);
+    NSBundle *hostBundle = [self hostMainBundle];
+    NSString *zsignPath = [hostBundle.bundlePath stringByAppendingPathComponent:@"Frameworks/ZSign.dylib"];
+    void* handle = dlopen(zsignPath.fileSystemRepresentation, RTLD_GLOBAL);
     const char* dlerr = dlerror();
     if (!handle || (uint64_t)handle > 0xf00000000000) {
         if (dlerr) {
-            *error = [NSError errorWithDomain:NSBundle.mainBundle.bundleIdentifier code:1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to load ZSign: %s", dlerr]}];
+            *error = [NSError errorWithDomain:hostBundle.bundleIdentifier code:1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to load ZSign: %s", dlerr]}];
         } else {
-            *error = [NSError errorWithDomain:NSBundle.mainBundle.bundleIdentifier code:1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to load ZSign: An unknown error occurred."]}];
+            *error = [NSError errorWithDomain:hostBundle.bundleIdentifier code:1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to load ZSign: An unknown error occurred."]}];
         }
         NSLog(@"[LC] %s", dlerr);
         return;
@@ -141,7 +147,7 @@
 
     NSLog(@"[LC] starting signing...");
     
-    NSProgress* ans = [NSClassFromString(@"ZSigner") signWithAppPath:[path path] bundleId:NSBundle.mainBundle.bundleIdentifier cert:self.certificateData pass:LCSharedUtils.certificatePassword completionHandler:completionHandler];
+    NSProgress* ans = [NSClassFromString(@"ZSigner") signWithAppPath:[path path] bundleId:[self hostMainBundle].bundleIdentifier cert:self.certificateData pass:LCSharedUtils.certificatePassword completionHandler:completionHandler];
     
     return ans;
 }
@@ -158,7 +164,7 @@
         [paths addObject:url.path];
     }
     
-    return [NSClassFromString(@"ZSigner") signMachOPathArr:paths bundleId:NSBundle.mainBundle.bundleIdentifier cert:self.certificateData
+    return [NSClassFromString(@"ZSigner") signMachOPathArr:paths bundleId:[self hostMainBundle].bundleIdentifier cert:self.certificateData
                                                       pass:LCSharedUtils.certificatePassword completionHandler:completionHandler];
 }
 
@@ -241,7 +247,7 @@
 }
 
 + (NSString *)appUrlScheme {
-    return NSBundle.mainBundle.infoDictionary[@"CFBundleURLTypes"][0][@"CFBundleURLSchemes"][0];
+    return NSUserDefaults.lcAppUrlScheme ?: [self hostMainBundle].infoDictionary[@"CFBundleURLTypes"][0][@"CFBundleURLSchemes"][0];
 }
 
 + (BOOL)isAppGroupAltStoreLike {
@@ -318,6 +324,9 @@
     infoDict[@"CFBundleDisplayName"] = newBundleName;
     infoDict[@"CFBundleName"] = newBundleName;
     infoDict[@"CFBundleIdentifier"] = [NSString stringWithFormat:@"com.kdt.%@", newBundleName];
+    if (infoDict[@"BGTaskSchedulerPermittedIdentifiers"]) {
+        infoDict[@"BGTaskSchedulerPermittedIdentifiers"] = @[[NSString stringWithFormat:@"%@.bgtask.*", infoDict[@"CFBundleIdentifier"]]];
+    }
     infoDict[@"CFBundleURLTypes"][0][@"CFBundleURLSchemes"][0] = [newBundleName lowercaseString];
     while([infoDict[@"CFBundleURLTypes"] count] > 1) {
         [infoDict[@"CFBundleURLTypes"] removeLastObject];
@@ -452,9 +461,10 @@
 }
 
 + (NSString *)getVersionInfo {
+    NSDictionary *info = [self hostMainBundle].infoDictionary;
     return [NSString stringWithFormat:@"Version %@-%@",
-            NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"],
-            NSBundle.mainBundle.infoDictionary[@"LCVersionInfo"]];
+            info[@"CFBundleShortVersionString"],
+            info[@"LCVersionInfo"]];
 }
 
 + (NSData*)bookmarkForURL:(NSURL*) url {
